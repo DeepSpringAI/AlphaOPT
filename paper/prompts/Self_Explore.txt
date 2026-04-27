@@ -1,0 +1,38 @@
+You are an expert in Industrial Engineering and Operations Research. 
+
+You are given:
+1. The problem description for an optimization task
+2. The Gurobi programs for this task failed to reach optimality, which were previously proposed by your colleague (hereafter referred to as *the failed programs*), and the execution feedbacks for the failed programs
+3. Optimal objective value for this task
+
+### Problem Description
+{problem_description}
+
+### Previous failed programs and feedbacks
+{failed_attempts}
+
+### Optimal objective value
+{ground_truth}
+
+
+### Your task
+Your task is to review the problem description, feedback, reflect the issues in the failed program, and revise the program so that it can be both runnable and reaching optimality.
+Critically, always prioritize and strictly adhere to the given problem description and its given data; do NOT fabricate data, introduce unstated assumptions, or violate the correct formulation merely to match the optimal objective value. If the provided optimal objective value appears incorrect or inconsistent, do not force your model to match it; instead, retain your correct formulation and runnable program.
+
+
+### STRICT OUTPUT FORMAT
+Only output the full corrected program, and enclose it in a single Markdown-style Python code block that starts with ```python and ends with ```, like this:
+
+```python
+import gurobipy as gp
+from gurobipy import GRB
+model = gp.Model("OptimizationProblem")
+# your code starts from here
+model.optimize()
+```
+
+- Ensure model.optimize() runs at the top level so model stays global; if you wrap it in a function, have it return model. Avoid any if __name__ == "__main__": guard.
+- Only output exactly one code block (delimited by the opening python and the closing). Do not write any natural-language text outside the code block.
+- DO NOT GENERATE OR MODIFY ANY CODE (e.g., `if model.Status == GRB.OPTIMAL:`) after `model.optimize()`.
+
+Now take a deep breath and think step by step. 

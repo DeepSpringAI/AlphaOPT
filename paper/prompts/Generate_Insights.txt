@@ -1,0 +1,95 @@
+You are an expert in Industrial Engineering and Operations Research teaching graduate students to avoid modeling-and-coding mistakes in solving optimization problems.
+
+You are given:
+1. A problem description for the optimization task
+2. A mathematical model proposed by your colleague which failed to yield an optimal solution when solved with the Gurobi optimizer (hereafter referred to as *the failed mathematical model*)
+3. The gold-standard program, which embodies the correct mathematical formulation of the optimization task
+
+
+### Problem description
+{problem_description}
+
+
+### The failed mathematical model
+(Note: the model is written in LaTeX and presented in a plain-text code block (```))
+{failed_formulation}
+
+
+### The gold-standard program
+{correct_program}
+
+
+### Your task
+Step 1: Compare the failed mathematical model with the correct mathematical model embodied in the gold-standard program to identify issues that prevent optimality. Note that variable names in the proposed model may differ from those in the gold-standard program. Please align them carefully based on the problem specification.
+
+Step 2: Using the insight taxonomy dictionaries provided below, extract one or more new insights, which should be a distinct and concise lesson derived from a specific issue identified in the failed mathematical model relative to the gold-standard program.
+
+Each new insight must contain exactly four fields:
+
+1) taxonomy - choose exactly one of the two aspects:
+    - Domain Modeling: Level-1 = Problem Domain (e.g., "Network Flow"); Level-2 = Specific Technique (e.g., "Flow Conservation").
+    - General Formulation: Level-1 = Formulation Component (e.g., "Variable Definition"); Level-2 = Specific Aspect/Pitfall (e.g., "Continuous vs. Discrete Confusion").
+
+    Taxonomy rule (nested-dict): `{{ Level-1 : {{ Level-2 : null | {{ "definition": "...", "condition": "..." }} }} }}`
+    - The taxonomy MUST always be expressed as a three-level nested dict: Level-1 -> Level-2 -> (null or a dict with "definition"/"condition").
+    - Pick exactly one Level-1 (existing key).
+    - Pick one or more Level-2 under that Level-1 (existing key or keys).
+    - For an existing Level-2, set its value to null.
+    - If you must invent a new Level-2, set its value to a dictionary with two one-sentence fields:
+        - "definition" - what the label means (scope/intent).
+        - "condition" - when to apply the label (a general trigger grounded in the problem description or in the defining features of the problem domain).
+    - If you must invent a new Level-1, include >= 1 Level-2 under it; each invented Level-2 must provide both "definition" and "condition".
+
+2) condition - Write it as a trigger explicitly grounded in the problem description or in the defining features of the problem domain. First state the general situation, then use this problem as an example. Use the pattern below, and keep it strictly non-prescriptive: do not give any solution, advice or decision:
+"This insight applies when ... For example, when the problem statement mentioned ...". 
+
+3) explanation - A brief and self-contained description that specifies, under this condition, what the best practice is, what the common mistake is and its cause. First, use this problem as an example to illustrate; Then, appropriately generalize the correct modeling strategy it reflects, if applicable.
+Use the pattern below, and ensure the generalization remains within an appropriate and reasonable scope:
+"When the problem involves... The best practice is... A common mistake is ... which happens because ... More generally, this reflects that ..." 
+
+4) example - A brief, self-contained demonstration showing wrong vs. correct version (principle, formulation, or code snippet). Clearly mark them as '# Wrong' and '# Correct'.
+
+### Taxonomy Dictionaries
+Domain Modeling
+{domain_taxo}
+
+General Formulation
+{formulation_taxo}
+
+### STRICT OUTPUT FORMAT
+Return a single JSON array of insight objects. No text before/after. Example with two insights (but not must be two):
+
+[
+    {{
+        "taxonomy": {{
+            "Domain Modeling": {{
+                "Network Flow": {{
+                    "<New Label If Necessary>": {{ "definition": "<one sentence>", "condition": "<one sentence>" }}
+                }}
+            }}
+        }},
+        "condition": "<text>",
+        "explanation": "<text>",
+        "example": "<text>"
+    }},
+
+    {{
+        "taxonomy": {{
+            "General Formulation": {{
+                "Variable Definition": {{
+                    "Continuous vs. Discrete Confusion": null
+                }}
+            }}
+        }},
+        "condition": "<text>",
+        "explanation": "<text>",
+        "example": "<text>"
+    }}
+]
+
+Guidelines:
+- Output as many distinct, non-overlapping insights as needed.
+- Prefer existing Level-1/Level-2 labels; invent new ones only when no suitable one exists, and phrase it in general terms (avoid overly specific or instance-bound wording).
+- Be precise in stage selection-use Domain Modeling for domain-specific techniques that arise only within specific problem families (e.g., Routing, Network Flow, Facility Location) and depend on those domains' structures; use General Formulation for domain-agnostic practices on variables, constraints, or objectives that apply broadly across domains.
+
+Now take a deep breath and think step by step. 

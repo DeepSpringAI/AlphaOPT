@@ -1,0 +1,53 @@
+{
+   "sources" : [
+      {
+         "usage" : "toplevel",
+         "filename" : "main.tex"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "ACM-Reference-Format.bst"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "prompts/Diagnose_Issues.txt"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "prompts/Diagnose_Pos_Neg.txt"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "prompts/Diagnose_Unretri.txt"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "prompts/Generate_Insights.txt"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "prompts/Ins_Refinement.txt"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "prompts/Retri_Condition.txt"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "prompts/Retri_Label.txt"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "prompts/Self_Explore.txt"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "reference.bib"
+      }
+   ],
+   "spec_version" : 1,
+   "texlive_version" : "2025",
+   "process" : {
+      "compiler" : "pdflatex"
+   }
+}

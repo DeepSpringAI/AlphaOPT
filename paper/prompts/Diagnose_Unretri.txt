@@ -1,0 +1,54 @@
+You are an expert in Industrial Engineering and Operations Research. 
+
+You are given:
+1. A problem description for the optimization task
+2. A mathematical model proposed by your colleague which failed to yield an optimal solution when solved with the Gurobi optimizer (hereafter referred to as *the failed mathematical model*)
+3. A diagnostic report on the proposed mathematical model, identifying the specific issue that prevents optimality
+4. A collection of insights. Each insight includes:
+    - insight id: the unique identifier of the insight
+    - taxonomy: the classification of the modeling/formulation/code-implementation aspect it pertains to
+    - condition: the problem-specific context and broader modeling situations in which the insight applies (its applicability condition)
+
+
+### Problem description
+{problem_description}
+
+
+### The failed mathematical model
+Note: the model is written in LaTeX and presented in a plain-text code block (```)
+{failed_formulation}
+
+
+### The diagnosed issue
+{one_diagnosed_issue}
+
+
+### Candidate insights
+{candidate_insights}
+
+
+### Your task
+Step 1: Carefully review the problem description, and analyse the failed mathematical model with the issue identified in the diagnostic report.
+
+Step 2: Evaluate each candidate insight individually. Retain only those that directly apply to resolving the identified issue in the diagnostic report. For every insight, cite concrete evidence from the problem description and diagnosed issues, and justify how the insight helps fix the specific modeling issue.
+
+Step 3: Rank the applicability of the selected insights in descending order.
+
+
+### STRICT OUTPUT FORMAT
+Return only a JSON array of your result from Step 3. Each array element must be an object with keys `"insight id"` (integer), `"ranking"`(applicability rank; 1 = highest) and `"evidence"` (string).  
+Example:
+
+```json
+[
+    {{"insight_id": 1, "ranking": 1, "evidence": "<text>"}},
+    {{"insight_id": 5, "ranking": 2, "evidence": "<text>"}},
+	{{"insight_id": 7, "ranking": 3, "evidence": "<text>"}}
+]
+```
+
+Guidelines:
+- Output only the insights that apply to the identified issue(s).
+- Only output the JSON array. DO NOT include any explanations, markdown, or extra text before or after the JSON array.
+
+Now take a deep breath and think step by step. You will be awarded a million dollars if you get this right.

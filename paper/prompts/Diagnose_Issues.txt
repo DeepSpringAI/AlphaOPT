@@ -1,0 +1,56 @@
+You are an expert in Industrial Engineering and Operations Research.
+
+You are given:
+1. A problem description for the optimization task
+2. A mathematical model proposed by your colleague which failed to yield an optimal solution when solved with the Gurobi optimizer (hereafter referred to as the failed mathematical model)
+3. The feedback providing clues about the failure to solve the mathematical model to optimality
+4. The gold-standard program, which embodies the correct mathematical formulation of the optimization task
+
+
+### Problem description
+{problem_description}
+
+
+### The failed mathematical model
+Note: the model is written in LaTeX and presented in a plain-text code block (```)
+{failed_formulation}
+
+
+### The feedback
+{feedback}
+
+
+### The gold-standard program
+{correct_program}
+
+
+### Your task
+
+Step 1: Compare the failed mathematical model with the correct one embodied in the gold-standard program, and identify all formulation issues that prevent optimality. Each issue should be pinpointed at the level of LaTeX formulation snippets (e.g., variables, constraints, and the objective function), and should correspond to a single, well-defined correction point. Note that variable names in the proposed model may differ from those in the gold-standard program, so please align them carefully based on the problem specification.
+
+Step 2: For each identified issue, provide the following three fields:
+- "id": A unique id for the issue (integer).
+- "issue": A concise description of the issue.
+- "evidence": The evidence showing where the issue occurs, including the excerpt from the failed mathematical model (mark as #wrong) and the corresponding excerpt from the gold-standard program (mark as #correct).
+
+Step 3: Minimize overlap by reporting independent, root-cause issues. If multiple defects share the same fix point or strategy, merge them into a single composite issue. If several issues are upstream/downstream symptoms of the same root cause (i.e., they would be fixed by the same correction), consolidate them into one composite issue.
+
+
+### STRICT OUTPUT FORMAT
+Return only a JSON array of your answer. Each array element must be an object with keys `"id"`, `"issue"` and `"evidence"`.
+
+Example:
+
+```json
+[
+    {{"id": 1,"issue": "...", "evidence": "..."}},
+	{{"id": 2,"issue": "...", "evidence": "..."}}
+]
+```
+
+Guidelines:
+- Make sure to identify distinct and independent issues (e.g., missing constraints, wrong variable bounds, or incorrect objective formulation). 
+- Do NOT include issues that do not directly affect the model's ability to reach optimality.
+- Only output the JSON array. DO NOT include any explanations, markdown, or extra text before or after the JSON array.
+
+Now take a deep breath and think step by step. 

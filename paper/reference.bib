@@ -1,0 +1,732 @@
+
+% Journals
+
+% First the Full Name is given, then the abbreviation used in the AMS Math
+% Reviews, with an indication if it could not be found there.
+% Note the 2nd overwrites the 1st, so swap them if you want the full name.
+
+ %{AMS}
+ @String{AMSTrans = "American Mathematical Society Translations" }
+ @String{AMSTrans = "Amer. Math. Soc. Transl." }
+ @String{BullAMS = "Bulletin of the American Mathematical Society" }
+ @String{BullAMS = "Bull. Amer. Math. Soc." }
+ @String{ProcAMS = "Proceedings of the American Mathematical Society" }
+ @String{ProcAMS = "Proc. Amer. Math. Soc." }
+ @String{TransAMS = "Transactions of the American Mathematical Society" }
+ @String{TransAMS = "Trans. Amer. Math. Soc." }
+
+ %ACM
+ @String{CACM = "Communications of the {ACM}" }
+ @String{CACM = "Commun. {ACM}" }
+ @String{CompServ = "Comput. Surveys" }
+ @String{JACM = "J. ACM" }
+ @String{ACMMathSoft = "{ACM} Transactions on Mathematical Software" }
+ @String{ACMMathSoft = "{ACM} Trans. Math. Software" }
+ @String{SIGNUM = "{ACM} {SIGNUM} Newsletter" }
+ @String{SIGNUM = "{ACM} {SIGNUM} Newslett." }
+
+ @String{AmerSocio = "American Journal of Sociology" }
+ @String{AmerStatAssoc = "Journal of the American Statistical Association" }
+ @String{AmerStatAssoc = "J. Amer. Statist. Assoc." }
+ @String{ApplMathComp = "Applied Mathematics and Computation" }
+ @String{ApplMathComp = "Appl. Math. Comput." }
+ @String{AmerMathMonthly = "American Mathematical Monthly" }
+ @String{AmerMathMonthly = "Amer. Math. Monthly" }
+ @String{BIT = "{BIT}" }
+ @String{BritStatPsych = "British Journal of Mathematical and Statistical
+          Psychology" }
+ @String{BritStatPsych = "Brit. J. Math. Statist. Psych." }
+ @String{CanMathBull = "Canadian Mathematical Bulletin" }
+ @String{CanMathBull = "Canad. Math. Bull." }
+ @String{CompApplMath = "Journal of Computational and Applied Mathematics" }
+ @String{CompApplMath = "J. Comput. Appl. Math." }
+ @String{CompPhys = "Journal of Computational Physics" }
+ @String{CompPhys = "J. Comput. Phys." }
+ @String{CompStruct = "Computers and Structures" }
+ @String{CompStruct = "Comput. \& Structures" }
+ @String{CompJour = "The Computer Journal" }
+ @String{CompJour = "Comput. J." }
+ @String{CompSysSci = "Journal of Computer and System Sciences" }
+ @String{CompSysSci = "J. Comput. System Sci." }
+ @String{Computing = "Computing" }
+ @String{ContempMath = "Contemporary Mathematics" }
+ @String{ContempMath = "Contemp. Math." }
+ @String{Crelle = "Crelle's Journal" }
+ @String{GiornaleMath = "Giornale di Mathematiche" }
+ @String{GiornaleMath = "Giorn. Mat." } % didn't find in AMS MR., ibid.
+
+ %IEEE
+ @String{Computer = "{IEEE} Computer" }
+ @String{IEEETransComp = "{IEEE} Transactions on Computers" }
+ @String{IEEETransComp = "{IEEE} Trans. Comput." }
+ @String{IEEETransAC = "{IEEE} Transactions on Automatic Control" }
+ @String{IEEETransAC = "{IEEE} Trans. Automat. Control" }
+ @String{IEEESpec = "{IEEE} Spectrum" } % didn't find in AMS MR
+ @String{ProcIEEE = "Proceedings of the {IEEE}" }
+ @String{ProcIEEE = "Proc. {IEEE}" } % didn't find in AMS MR
+ @String{IEEETransAeroElec = "{IEEE} Transactions on Aerospace and Electronic
+     Systems" }
+ @String{IEEETransAeroElec = "{IEEE} Trans. Aerospace Electron. Systems" }
+
+ @String{IMANumerAna = "{IMA} Journal of Numerical Analysis" }
+ @String{IMANumerAna = "{IMA} J. Numer. Anal." }
+ @String{InfProcLet = "Information Processing Letters" }
+ @String{InfProcLet = "Inform. Process. Lett." }
+ @String{InstMathApp = "Journal of the Institute of Mathematics and
+     its Applications" }
+ @String{InstMathApp = "J. Inst. Math. Appl." }
+ @String{IntControl = "International Journal of Control" }
+ @String{IntControl = "Internat. J. Control" }
+ @String{IntNumerEng = "International Journal for Numerical Methods in
+     Engineering" }
+ @String{IntNumerEng = "Internat. J. Numer. Methods Engrg." }
+ @String{IntSuper = "International Journal of Supercomputing Applications" }
+ @String{IntSuper = "Internat. J. Supercomputing Applic." } % didn't find
+%% in AMS MR
+ @String{Kibernetika = "Kibernetika" }
+ @String{JResNatBurStand = "Journal of Research of the National Bureau
+     of Standards" }
+ @String{JResNatBurStand = "J. Res. Nat. Bur. Standards" }
+ @String{LinAlgApp = "Linear Algebra and its Applications" }
+ @String{LinAlgApp = "Linear Algebra Appl." }
+ @String{MathAnaAppl = "Journal of Mathematical Analysis and Applications" }
+ @String{MathAnaAppl = "J. Math. Anal. Appl." }
+ @String{MathAnnalen = "Mathematische Annalen" }
+ @String{MathAnnalen = "Math. Ann." }
+ @String{MathPhys = "Journal of Mathematical Physics" }
+ @String{MathPhys = "J. Math. Phys." }
+ @String{MathComp = "Mathematics of Computation" }
+ @String{MathComp = "Math. Comp." }
+ @String{MathScand = "Mathematica Scandinavica" }
+ @String{MathScand = "Math. Scand." }
+ @String{TablesAidsComp = "Mathematical Tables and Other Aids to Computation" }
+ @String{TablesAidsComp = "Math. Tables Aids Comput." }
+ @String{NumerMath = "Numerische Mathematik" }
+ @String{NumerMath = "Numer. Math." }
+ @String{PacificMath = "Pacific Journal of Mathematics" }
+ @String{PacificMath = "Pacific J. Math." }
+ @String{ParDistComp = "Journal of Parallel and Distributed Computing" }
+ @String{ParDistComp = "J. Parallel and Distrib. Comput." } % didn't find
+%% in AMS MR
+ @String{ParComputing = "Parallel Computing" }
+ @String{ParComputing = "Parallel Comput." }
+ @String{PhilMag = "Philosophical Magazine" }
+ @String{PhilMag = "Philos. Mag." }
+ @String{ProcNAS = "Proceedings of the National Academy of Sciences
+                    of the USA" }
+ @String{ProcNAS = "Proc. Nat. Acad. Sci. U. S. A." }
+ @String{Psychometrika = "Psychometrika" }
+ @String{QuartMath = "Quarterly Journal of Mathematics, Oxford, Series (2)" }
+ @String{QuartMath = "Quart. J. Math. Oxford Ser. (2)" }
+ @String{QuartApplMath = "Quarterly of Applied Mathematics" }
+ @String{QuartApplMath = "Quart. Appl. Math." }
+ @String{RevueInstStat = "Review of the International Statisical Institute" }
+ @String{RevueInstStat = "Rev. Inst. Internat. Statist." }
+
+ %SIAM
+ @String{JSIAM = "Journal of the Society for Industrial and Applied
+     Mathematics" }
+ @String{JSIAM = "J. Soc. Indust. Appl. Math." }
+ @String{JSIAMB = "Journal of the Society for Industrial and Applied
+     Mathematics, Series B, Numerical Analysis" }
+ @String{JSIAMB = "J. Soc. Indust. Appl. Math. Ser. B Numer. Anal." }
+ @String{SIAMAlgMeth = "{SIAM} Journal on Algebraic and Discrete Methods" }
+ @String{SIAMAlgMeth = "{SIAM} J. Algebraic Discrete Methods" }
+ @String{SIAMAppMath = "{SIAM} Journal on Applied Mathematics" }
+ @String{SIAMAppMath = "{SIAM} J. Appl. Math." }
+ @String{SIAMComp = "{SIAM} Journal on Computing" }
+ @String{SIAMComp = "{SIAM} J. Comput." }
+ @String{SIAMMatrix = "{SIAM} Journal on Matrix Analysis and Applications" }
+ @String{SIAMMatrix = "{SIAM} J. Matrix Anal. Appl." }
+ @String{SIAMNumAnal = "{SIAM} Journal on Numerical Analysis" }
+ @String{SIAMNumAnal = "{SIAM} J. Numer. Anal." }
+ @String{SIAMReview = "{SIAM} Review" }
+ @String{SIAMReview = "{SIAM} Rev." }
+ @String{SIAMSciStat = "{SIAM} Journal on Scientific and Statistical
+     Computing" }
+ @String{SIAMSciStat = "{SIAM} J. Sci. Statist. Comput." }
+
+ @String{SoftPracExp = "Software Practice and Experience" }
+ @String{SoftPracExp = "Software Prac. Experience" } % didn't find in AMS MR
+ @String{StatScience = "Statistical Science" }
+ @String{StatScience = "Statist. Sci." }
+ @String{Techno = "Technometrics" }
+ @String{USSRCompMathPhys = "{USSR} Computational Mathematics and Mathematical
+     Physics" }
+ @String{USSRCompMathPhys = "{U. S. S. R.} Comput. Math. and Math. Phys." }
+ @String{VLSICompSys = "Journal of {VLSI} and Computer Systems" }
+ @String{VLSICompSys = "J. {VLSI} Comput. Syst." }
+ @String{ZAngewMathMech = "Zeitschrift fur Angewandte Mathematik und
+     Mechanik" }
+ @String{ZAngewMathMech = "Z. Angew. Math. Mech." }
+ @String{ZAngewMathPhys = "Zeitschrift fur Angewandte Mathematik und Physik" }
+ @String{ZAngewMathPhys = "Z. Angew. Math. Phys." }
+
+% Publishers % ================================================= |
+
+ @String{Academic = "Academic Press" }
+ @String{ACMPress = "{ACM} Press" }
+ @String{AdamHilger = "Adam Hilger" }
+ @String{AddisonWesley = "Addison-Wesley" }
+ @String{AllynBacon = "Allyn and Bacon" }
+ @String{AMS = "American Mathematical Society" }
+ @String{Birkhauser = "Birkh{\"a}user" }
+ @String{CambridgePress = "Cambridge University Press" }
+ @String{Chelsea = "Chelsea" }
+ @String{ClaredonPress = "Claredon Press" }
+ @String{DoverPub = "Dover Publications" }
+ @String{Eyolles = "Eyolles" }
+ @String{HoltRinehartWinston = "Holt, Rinehart and Winston" }
+ @String{Interscience = "Interscience" }
+ @String{JohnsHopkinsPress = "The Johns Hopkins University Press" }
+ @String{JohnWileySons = "John Wiley and Sons" }
+ @String{Macmillan = "Macmillan" }
+ @String{MathWorks = "The Math Works Inc." }
+ @String{McGrawHill = "McGraw-Hill" }
+ @String{NatBurStd = "National Bureau of Standards" }
+ @String{NorthHolland = "North-Holland" }
+ @String{OxfordPress = "Oxford University Press" }  %address Oxford or London?
+ @String{PergamonPress = "Pergamon Press" }
+ @String{PlenumPress = "Plenum Press" }
+ @String{PrenticeHall = "Prentice-Hall" }
+ @String{SIAMPub = "{SIAM} Publications" }
+ @String{Springer = "Springer-Verlag" }
+ @String{TexasPress = "University of Texas Press" }
+ @String{VanNostrand = "Van Nostrand" }
+ @String{WHFreeman = "W. H. Freeman and Co." }
+
+
+# OPT
+@inproceedings{astorga2025autoformulation,
+  title     = {Autoformulation of Mathematical Optimization Models Using {LLM}s},
+  author    = {Astorga, Nicol{\'a}s and Liu, Tennison and Xiao, Yuanzhang and van der Schaar, Mihaela},
+  booktitle = {Proceedings of the 42nd International Conference on Machine Learning (ICML)},
+  series    = {Proceedings of Machine Learning Research},
+  volume    = {267},
+  year      = {2025},
+  url       = {https://proceedings.mlr.press/v267/astorga25a.html},
+  eprint    = {2411.01679},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.LG},
+  doi       = {10.48550/arXiv.2411.01679}
+}
+
+@inproceedings{xiao2024chain,
+  title     = {Chain-of-Experts: When {LLM}s Meet Complex Operations Research Problems},
+  author    = {Xiao, Ziyang and Zhang, Mengxi and He, Rui and Zhang, Yixiao and Wu, Ke and He, Yulin and Hu, Zeyuan and Tan, Ming and Han, Song and Tang, Jie and others},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2024},
+  url       = {https://openreview.net/forum?id=HobyL1B9CZ}
+}
+
+@article{yang2024optibench,
+  title        = {{OptiBench} Meets {ReSocratic}: Measure and Improve {LLM}s for Optimization Modeling},
+  author       = {Yang, Zhicheng and Wang, Yiwei and Huang, Yinya and Guo, Zhijiang and Shi, Wei and Han, Xiongwei and Feng, Liang and Song, Linqi and Liang, Xiaodan and Tang, Jing},
+  year         = {2024},
+  eprint       = {2407.09887},
+  archivePrefix= {arXiv},
+  primaryClass = {cs.AI},
+  doi          = {10.48550/arXiv.2407.09887},
+  url          = {https://arxiv.org/abs/2407.09887},
+  note         = {Published as a conference paper at ICLR 2025}
+}
+
+@article{yang2025heuragenix,
+  title        = {{HeurAgenix}: Leveraging {LLM}s for Solving Complex Combinatorial Optimization Challenges},
+  author       = {Yang, Xianliang and Zhang, Ling and Qian, Haolong and Song, Lei and Bian, Jiang},
+  year         = {2025},
+  eprint       = {2506.15196},
+  archivePrefix= {arXiv},
+  primaryClass = {cs.AI},
+  doi          = {10.48550/arXiv.2506.15196},
+  url          = {https://arxiv.org/abs/2506.15196}
+}
+
+@article{wu2025efficientheuristics,
+  title   = {Efficient Heuristics Generation for Solving Combinatorial Optimization Problems Using Large Language Models},
+  author  = {Wu, Xuan and Wang, Di and Wu, Chunguo and Wen, Lijie and Miao, Chunyan and Xiao, Yubin and Zhou, You},
+  journal = {arXiv preprint arXiv:2505.12627},
+  year    = {2025},
+  url     = {https://arxiv.org/abs/2505.12627}
+}
+
+@misc{yang2025orthought,
+      title={Automated Optimization Modeling through Expert-Guided Large Language Model Reasoning}, 
+      author={Beinuo Yang and Qishen Zhou and Junyi Li and Chenxing Su and Simon Hu},
+      year={2025},
+      eprint={2508.14410},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2508.14410}, 
+}
+
+@article{jiang2024llmopt,
+  title        = {{LLMOPT}: Learning to Define and Solve General Optimization Problems from Scratch},
+  author       = {Jiang, Caigao and Shu, Xiang and Qian, Hong and Lu, Xingyu and Zhou, Jun and Zhou, Aimin and Yu, Yang},
+  year         = {2024},
+  eprint       = {2410.13213},
+  archivePrefix= {arXiv},
+  primaryClass = {cs.AI},
+  doi          = {10.48550/arXiv.2410.13213},
+  url          = {https://arxiv.org/abs/2410.13213}
+}
+
+@article{ding2025orr1,
+  title        = {{OR-R1}: Automating Modeling and Solving of Operations Research Optimization Problem via Test-Time Reinforcement Learning},
+  author       = {Ding, Zezhen and Tan, Zhen and Zhang, Jiheng and Chen, Tianlong},
+  year         = {2025},
+  eprint       = {2511.09092},
+  archivePrefix= {arXiv},
+  primaryClass = {cs.AI},
+  doi          = {10.48550/arXiv.2511.09092},
+  url          = {https://arxiv.org/abs/2511.09092}
+}
+
+
+@misc{liang2026leanllmopt,
+      title={Large-Scale Optimization Model Auto-Formulation: Harnessing LLM Flexibility via Structured Workflow}, 
+      author={Kuo Liang and Yuhang Lu and Jianming Mao and Shuyi Sun and Chunwei Yang and Congcong Zeng and Xiao Jin and Hanzhang Qin and Ruihao Zhu and Chung-Piaw Teo},
+      year={2026},
+      eprint={2601.09635},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2601.09635}, 
+}
+
+# Experience Learning
+
+@article{zhao2023expel,
+  title        = {ExpeL: LLM Agents Are Experiential Learners},
+  author       = {Zhao, Andrew and Huang, Daniel and Xu, Quentin and Lin, Matthieu and Liu, Yong-Jin and Huang, Gao},
+  journal      = {arXiv preprint arXiv:2308.10144},
+  year         = {2023},
+  url          = {https://arxiv.org/abs/2308.10144},
+  doi          = {10.48550/arXiv.2308.10144}
+}
+
+@inproceedings{park2023generative,
+  title        = {Generative Agents: Interactive Simulacra of Human Behavior},
+  author       = {Park, Joon Sung and O'Brien, Joseph C. and Cai, Carrie J. and Morris, Meredith Ringel and Liang, Percy and Bernstein, Michael S.},
+  booktitle    = {Proceedings of the 2023 CHI Conference on Human Factors in Computing Systems (CHI '23)},
+  year         = {2023},
+  publisher    = {Association for Computing Machinery},
+  doi          = {10.1145/3586183.3606763},
+  url          = {https://arxiv.org/abs/2304.03442}
+}
+
+@article{zhu2023llmrules,
+  title        = {Large Language Models can Learn Rules},
+  author       = {Zhu, Zhaocheng and Xue, Yuan and Chen, Xinyun and Zhou, Denny and Tang, Jian and Schuurmans, Dale and Dai, Hanjun},
+  journal      = {arXiv preprint arXiv:2310.07064},
+  year         = {2023},
+  url          = {https://arxiv.org/abs/2310.07064},
+  doi          = {10.48550/arXiv.2310.07064}
+}
+
+@article{qin2023toolllm,
+  title        = {ToolLLM: Facilitating Large Language Models to Master 16000+ Real-world APIs},
+  author       = {Qin, Yujia and Liang, Shihao and Ye, Yining and Zhu, Kunlun and Yan, Lan and Lu, Yaxi and Lin, Yankai and Cong, Xin and Tang, Xiangru and Qian, Bill and Zhao, Sihan and Hong, Lauren and Tian, Runchu and Xie, Ruobing and Zhou, Jie and Gerstein, Mark and Li, Dahai and Liu, Zhiyuan and Sun, Maosong},
+  journal      = {arXiv preprint arXiv:2307.16789},
+  year         = {2023},
+  url          = {https://arxiv.org/abs/2307.16789},
+  doi          = {10.48550/arXiv.2307.16789}
+}
+
+@article{zhou2023webarena,
+  title        = {WebArena: A Realistic Web Environment for Building Autonomous Agents},
+  author       = {Zhou, Shuyan and Xu, Frank F. and Zhu, Hao and Zhou, Xuhui and Lo, Robert and Sridhar, Abishek and Cheng, Xianyi and Ou, Tianyue and Bisk, Yonatan and Fried, Daniel and Alon, Uri and Neubig, Graham},
+  journal      = {arXiv preprint arXiv:2307.13854},
+  year         = {2023},
+  url          = {https://arxiv.org/abs/2307.13854},
+  doi          = {10.48550/arXiv.2307.13854}
+}
+
+@article{jimenez2023swebench,
+  title        = {SWE-bench: Can Language Models Resolve Real-World GitHub Issues?},
+  author       = {Jimenez, Carlos E. and Yang, John and Wettig, Alexander and Yao, Shunyu and Pei, Kexin and Press, Ofir and Narasimhan, Karthik},
+  journal      = {arXiv preprint arXiv:2310.06770},
+  year         = {2023},
+  url          = {https://arxiv.org/abs/2310.06770},
+  doi          = {10.48550/arXiv.2310.06770}
+}
+
+@article{wang2024awm,
+  title        = {Agent Workflow Memory},
+  author       = {Wang, Zora Zhiruo and Mao, Jiayuan and Fried, Daniel and Neubig, Graham},
+  journal      = {arXiv preprint arXiv:2409.07429},
+  year         = {2024},
+  url          = {https://arxiv.org/abs/2409.07429},
+  doi          = {10.48550/arXiv.2409.07429}
+}
+
+@article{feng2025agentrr,
+  title        = {Get Experience from Practice: LLM Agents with Record \& Replay},
+  author       = {Feng, Erhu and Zhou, Wenbo and Liu, Zibin and Chen, Le and Dong, Yunpeng and Zhang, Cheng and Zhao, Yisheng and Du, Dong and Hua, Zhichao and Xia, Yubin and Chen, Haibo},
+  journal      = {arXiv preprint arXiv:2505.17716},
+  year         = {2025},
+  url          = {https://arxiv.org/abs/2505.17716},
+  doi          = {10.48550/arXiv.2505.17716}
+}
+
+@article{tang2025agentkb,
+  title        = {Agent KB: Leveraging Cross-Domain Experience for Agentic Problem Solving},
+  author       = {Tang, Xiangru and Qin, Tianrui and Peng, Tianhao and Zhou, Ziyang and Shao, Daniel and Du, Tingting and Wei, Xinming and Xia, Peng and Wu, Fang and Zhu, He and Zhang, Ge and Liu, Jiaheng and Wang, Xingyao and Hong, Sirui and Wu, Chenglin and Cheng, Hao and Wang, Chi and Zhou, Wangchunshu},
+  journal      = {arXiv preprint arXiv:2507.06229},
+  year         = {2025},
+  url          = {https://arxiv.org/abs/2507.06229},
+  doi          = {10.48550/arXiv.2507.06229}
+}
+
+@article{ouyang2025reasoningbank,
+  title        = {ReasoningBank: Scaling Agent Self-Evolving with Reasoning Memory},
+  author       = {Ouyang, Siru and Yan, Jun and Hsu, I-Hung and Chen, Yanfei and Jiang, Ke and Wang, Zifeng and Han, Rujun and Le, Long T. and Daruki, Samira and Tang, Xiangru and Tirumalashetty, Vishy and Lee, George and Rofouei, Mahsan and Lin, Hangfei and Han, Jiawei and Lee, Chen-Yu and Pfister, Tomas},
+  journal      = {arXiv preprint arXiv:2509.25140},
+  year         = {2025},
+  url          = {https://arxiv.org/abs/2509.25140},
+  doi          = {10.48550/arXiv.2509.25140}
+}
+
+
+@article{ahmaditeshnizi2024optimus,
+  title={OptiMUS-0.3: Using Large Language Models to Model and Solve Optimization Problems at Scale},
+  author={AhmadiTeshnizi, Ali and Gao, Wenzhi and Brunborg, Herman and Talaei, Shayan and Udell, Madeleine},
+  journal={arXiv preprint arXiv:2407.19633},
+  year={2024}
+}
+
+@inproceedings{tang2025agent,
+  title={Agent KB: Leveraging Cross-Domain Experience for Agentic Problem Solving},
+  author={Tang, Xiangru and Qin, Tianrui and Peng, Tianhao and Zhou, Ziyang and Shao, Daniel and Du, Tingting and Wei, Xinming and Xia, Peng and Wu, Fang and Zhu, He and Zhang, Ge and Liu, Jiaheng and Wang, Xingyao and Hong, Sirui and Wu, Chenglin and Cheng, Hao and Wang, Chi and Zhou, Wangchunshu},
+  booktitle={ICML 2025 Workshop on Collaborative and Federated Agentic Workflows}
+}
+
+@inproceedings{JiangShu2025llmopt,
+  title     = {LLMOPT: Learning to Define and Solve General Optimization Problems from Scratch},
+  author    = {Caigao Jiang and Xiang Shu and Hong Qian and Xingyu Lu and Jun Zhou and Aimin Zhou and Yang Yu},
+  booktitle = {Proceedings of the Thirteenth International Conference on Learning Representations (ICLR)},
+  year      = {2025},
+  address   = {Singapore, Singapore},
+  url       = {https://openreview.net/pdf?id=9OMvtboTJg}
+}
+
+
+@InProceedings{NL4OPT,
+  title = 	 {NL4Opt Competition: Formulating Optimization Problems Based on Their Natural Language Descriptions},
+  author =       {Ramamonjison, Rindranirina and Yu, Timothy and Li, Raymond and Li, Haley and Carenini, Giuseppe and Ghaddar, Bissan and He, Shiqi and Mostajabdaveh, Mahdi and Banitalebi-Dehkordi, Amin and Zhou, Zirui and Zhang, Yong},
+  booktitle = 	 {Proceedings of the NeurIPS 2022 Competitions Track},
+  pages = 	 {189--203},
+  year = 	 {2022},
+  editor = 	 {Ciccone, Marco and Stolovitzky, Gustavo and Albrecht, Jacob},
+  volume = 	 {220},
+  series = 	 {Proceedings of Machine Learning Research},
+  month = 	 {28 Nov--09 Dec},
+  publisher =    {PMLR},
+  url = 	 {https://proceedings.mlr.press/v220/ramamonjison23a.html},
+}
+
+@misc{huang2024mamo,
+      title={Mamo: a Mathematical Modeling Benchmark with Solvers}, 
+      author={Xuhan Huang and Qingning Shen and Yan Hu and Anningzhe Gao and Benyou Wang},
+      year={2024},
+      eprint={2405.13144},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI}
+}
+
+@article{guo2025deepseek,
+  title={Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning},
+  author={Guo, Daya and Yang, Dejian and Zhang, Haowei and Song, Junxiao and Zhang, Ruoyu and Xu, Runxin and Zhu, Qihao and Ma, Shirong and Wang, Peiyi and Bi, Xiao and others},
+  journal={arXiv preprint arXiv:2501.12948},
+  year={2025}
+}
+
+@article{grayeli2024symbolic,
+  title={Symbolic regression with a learned concept library},
+  author={Grayeli, Arya and Sehgal, Atharva and Costilla Reyes, Omar and Cranmer, Miles and Chaudhuri, Swarat},
+  journal={Advances in Neural Information Processing Systems},
+  volume={37},
+  pages={44678--44709},
+  year={2024}
+}
+
+@article{novikov2025alphaevolve,
+  title={AlphaEvolve: A coding agent for scientific and algorithmic discovery},
+  author={Novikov, Alexander and V{\~u}, Ng{\^a}n and Eisenberger, Marvin and Dupont, Emilien and Huang, Po-Sen and Wagner, Adam Zsolt and Shirobokov, Sergey and Kozlovskii, Borislav and Ruiz, Francisco JR and Mehrabian, Abbas and others},
+  journal={arXiv preprint arXiv:2506.13131},
+  year={2025}
+}
+
+@article{romera2024mathematical,
+  title={Mathematical discoveries from program search with large language models},
+  author={Romera-Paredes, Bernardino and Barekatain, Mohammadamin and Novikov, Alexander and Balog, Matej and Kumar, M Pawan and Dupont, Emilien and Ruiz, Francisco JR and Ellenberg, Jordan S and Wang, Pengming and Fawzi, Omar and others},
+  journal={Nature},
+  volume={625},
+  number={7995},
+  pages={468--475},
+  year={2024},
+  publisher={Nature Publishing Group UK London}
+}
+
+
+@article{shao2024deepseekmath,
+  title={Deepseekmath: Pushing the limits of mathematical reasoning in open language models},
+  author={Shao, Zhihong and Wang, Peiyi and Zhu, Qihao and Xu, Runxin and Song, Junxiao and Bi, Xiao and Zhang, Haowei and Zhang, Mingchuan and Li, YK and Wu, Yang and others},
+  journal={arXiv preprint arXiv:2402.03300},
+  year={2024}
+}
+
+
+@article{yang2025reasonflux,
+  title={Reasonflux: Hierarchical llm reasoning via scaling thought templates},
+  author={Yang, Ling and Yu, Zhaochen and Cui, Bin and Wang, Mengdi},
+  journal={arXiv preprint arXiv:2502.06772},
+  year={2025}
+}
+
+@article{ellis2023dreamcoder,
+  title={Dreamcoder: growing generalizable, interpretable knowledge with wake--sleep bayesian program learning},
+  author={Ellis, Kevin and Wong, Lionel and Nye, Maxwell and Sable-Meyer, Mathias and Cary, Luc and Anaya Pozo, Lore and Hewitt, Luke and Solar-Lezama, Armando and Tenenbaum, Joshua B},
+  journal={Philosophical Transactions of the Royal Society A},
+  volume={381},
+  number={2251},
+  pages={20220050},
+  year={2023},
+  publisher={The Royal Society}
+}
+
+@article{feng2025get,
+  title={Get Experience from Practice: LLM Agents with Record \& Replay},
+  author={Feng, Erhu and Zhou, Wenbo and Liu, Zibin and Chen, Le and Dong, Yunpeng and Zhang, Cheng and Zhao, Yisheng and Du, Dong and Hua, Zhichao and Xia, Yubin and others},
+  journal={arXiv preprint arXiv:2505.17716},
+  year={2025}
+}
+
+@inproceedings{grandlilo,
+  title={LILO: Learning Interpretable Libraries by Compressing and Documenting Code},
+  author={Grand, Gabriel and Wong, Lionel and Bowers, Matthew and Olausson, Theo X and Liu, Muxin and Tenenbaum, Joshua B and Andreas, Jacob},
+  booktitle={The Twelfth International Conference on Learning Representations}
+}
+
+
+@article{mu2025experepair,
+  title={EXPEREPAIR: Dual-Memory Enhanced LLM-based Repository-Level Program Repair},
+  author={Mu, Fangwen and Wang, Junjie and Shi, Lin and Wang, Song and Li, Shoubin and Wang, Qing},
+  journal={arXiv preprint arXiv:2506.10484},
+  year={2025}
+}
+
+@inproceedings{tziafas2024lifelong,
+  title={Lifelong robot library learning: Bootstrapping composable and generalizable skills for embodied control with language models},
+  author={Tziafas, Georgios and Kasaei, Hamidreza},
+  booktitle={2024 IEEE International Conference on Robotics and Automation (ICRA)},
+  pages={515--522},
+  year={2024},
+  organization={IEEE}
+}
+
+@inproceedings{wangagent,
+  title={Agent Workflow Memory},
+  author={Wang, Zora Zhiruo and Mao, Jiayuan and Fried, Daniel and Neubig, Graham},
+  booktitle={Forty-second International Conference on Machine Learning}
+}
+
+// TextGrad
+@article{yuksekgonul2025optimizing,
+  title={Optimizing generative AI by backpropagating language model feedback},
+  author={Yuksekgonul, Mert and Bianchi, Federico and Boen, Joseph and Liu, Sheng and Lu, Pan and Huang, Zhi and Guestrin, Carlos and Zou, James},
+  journal={Nature},
+  volume={639},
+  pages={609--616},
+  year={2025},
+}
+
+
+@misc{zhao2024expel,
+      title={ExpeL: LLM Agents Are Experiential Learners}, 
+      author={Andrew Zhao and Daniel Huang and Quentin Xu and Matthieu Lin and Yong-Jin Liu and Gao Huang},
+      year={2024},
+      eprint={2308.10144},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2308.10144}, 
+}
+
+@article{zhu2023large,
+  title={Large language models can learn rules},
+  author={Zhu, Zhaocheng and Xue, Yuan and Chen, Xinyun and Zhou, Denny and Tang, Jian and Schuurmans, Dale and Dai, Hanjun},
+  journal={arXiv preprint arXiv:2310.07064},
+  year={2023}
+}
+
+
+@article{huang2024can,
+  title={Can Large Language Models Solve Robot Routing?},
+  author={Huang, Zhehui and Shi, Guangyao and Sukhatme, Gaurav S},
+  journal={arXiv preprint arXiv:2403.10795},
+  year={2024}
+}
+
+@article{huang2025orlm,
+  title={Orlm: A customizable framework in training large models for automated optimization modeling},
+  author={Huang, Chenyu and Tang, Zhengyang and Hu, Shixi and Jiang, Ruoqing and Zheng, Xin and Ge, Dongdong and Wang, Benyou and Wang, Zizhuo},
+  journal={Operations Research},
+  year={2025},
+  publisher={INFORMS}
+}
+
+@inproceedings{liuevolution,
+  title={Evolution of Heuristics: Towards Efficient Automatic Algorithm Design Using Large Language Model},
+  author={Liu, Fei and Xialiang, Tong and Yuan, Mingxuan and Lin, Xi and Luo, Fu and Wang, Zhenkun and Lu, Zhichao and Zhang, Qingfu},
+  booktitle={Forty-first International Conference on Machine Learning}
+}
+
+@article{thind2025optimai,
+  title={OptimAI: Optimization from Natural Language Using LLM-Powered AI Agents},
+  author={Thind, Raghav and Sun, Youran and Liang, Ling and Yang, Haizhao},
+  journal={arXiv preprint arXiv:2504.16918},
+  year={2025}
+}
+
+@inproceedings{xiao2023chain,
+  title={Chain-of-experts: When llms meet complex operations research problems},
+  author={Xiao, Ziyang and Zhang, Dongxiang and Wu, Yangjun and Xu, Lilin and Wang, Yuan Jessica and Han, Xiongwei and Fu, Xiaojin and Zhong, Tao and Zeng, Jia and Song, Mingli and others},
+  booktitle={The twelfth international conference on learning representations},
+  year={2023}
+}
+
+
+@inproceedings{yang2023large,
+  title={Large language models as optimizers},
+  author={Yang, Chengrun and Wang, Xuezhi and Lu, Yifeng and Liu, Hanxiao and Le, Quoc V and Zhou, Denny and Chen, Xinyun},
+  booktitle={The Twelfth International Conference on Learning Representations}
+}
+
+@article{zhang2025or,
+  title={Or-llm-agent: Automating modeling and solving of operations research optimization problem with reasoning large language model},
+  author={Zhang, Bowen and Luo, Pengcheng},
+  journal={arXiv preprint arXiv:2503.10009},
+  year={2025}
+}
+
+@book{bertsimas1997introduction,
+  title={Introduction to linear optimization},
+  author={Bertsimas, Dimitris and Tsitsiklis, John N},
+  volume={6},
+  year={1997},
+  publisher={Athena scientific Belmont, MA}
+}
+
+@inproceedings{nijkampcodegen,
+  title={CodeGen: An Open Large Language Model for Code with Multi-Turn Program Synthesis},
+  author={Nijkamp, Erik and Pang, Bo and Hayashi, Hiroaki and Tu, Lifu and Wang, Huan and Zhou, Yingbo and Savarese, Silvio and Xiong, Caiming},
+  booktitle={The Eleventh International Conference on Learning Representations}
+}
+
+@inproceedings{
+jimenez2024swebench,
+title={{SWE}-bench: Can Language Models Resolve Real-world Github Issues?},
+author={Carlos E Jimenez and John Yang and Alexander Wettig and Shunyu Yao and Kexin Pei and Ofir Press and Karthik R Narasimhan},
+booktitle={The Twelfth International Conference on Learning Representations},
+year={2024},
+url={https://openreview.net/forum?id=VTF8yNQM66}
+}
+
+@article{ouyang2022training,
+  title={Training language models to follow instructions with human feedback},
+  author={Ouyang, Long and Wu, Jeffrey and Jiang, Xu and Almeida, Diogo and Wainwright, Carroll and Mishkin, Pamela and Zhang, Chong and Agarwal, Sandhini and Slama, Katarina and Ray, Alex and others},
+  journal={Advances in neural information processing systems},
+  volume={35},
+  pages={27730--27744},
+  year={2022}
+}
+
+@inproceedings{DBLP:conf/iclr/QinLYZYLLCTQZHT24,
+  author={Yujia Qin and Shihao Liang and Yining Ye and Kunlun Zhu and Lan Yan and Yaxi Lu and Yankai Lin and Xin Cong and Xiangru Tang and Bill Qian and Sihan Zhao and Lauren Hong and Runchu Tian and Ruobing Xie and Jie Zhou and Mark Gerstein and Dahai Li and Zhiyuan Liu and Maosong Sun},
+  title={ToolLLM: Facilitating Large Language Models to Master 16000+ Real-world APIs},
+  year={2024},
+  cdate={1704067200000},
+  url={https://openreview.net/forum?id=dHng2O0Jjr},
+  booktitle={ICLR}
+}
+
+
+@article{lu2025optmath,
+  title={Optmath: A scalable bidirectional data synthesis framework for optimization modeling},
+  author={Lu, Hongliang and Xie, Zhonglin and Wu, Yaoyu and Ren, Can and Chen, Yuxuan and Wen, Zaiwen},
+  journal={arXiv preprint arXiv:2502.11102},
+  year={2025}
+}
+
+
+@article{zelikman2022star,
+  title={Star: Bootstrapping reasoning with reasoning},
+  author={Zelikman, Eric and Wu, Yuhuai and Mu, Jesse and Goodman, Noah},
+  journal={Advances in Neural Information Processing Systems},
+  volume={35},
+  pages={15476--15488},
+  year={2022}
+}
+
+@article{shinn2023reflexion,
+  title={Reflexion: Language agents with verbal reinforcement learning},
+  author={Shinn, Noah and Cassano, Federico and Gopinath, Ashwin and Narasimhan, Karthik and Yao, Shunyu},
+  journal={Advances in Neural Information Processing Systems},
+  volume={36},
+  pages={8634--8652},
+  year={2023}
+}
+
+
+@article{ostapenko2024towards,
+  title={Towards modular llms by building and reusing a library of loras},
+  author={Ostapenko, Oleksiy and Su, Zhan and Ponti, Edoardo Maria and Charlin, Laurent and Roux, Nicolas Le and Pereira, Matheus and Caccia, Lucas and Sordoni, Alessandro},
+  journal={arXiv preprint arXiv:2405.11157},
+  year={2024}
+}
+@article{fang2025memp,
+  title={Memp: Exploring agent procedural memory},
+  author={Fang, Runnan and Liang, Yuan and Wang, Xiaobin and Wu, Jialong and Qiao, Shuofei and Xie, Pengjun and Huang, Fei and Chen, Huajun and Zhang, Ningyu},
+  journal={arXiv preprint arXiv:2508.06433},
+  year={2025}
+}
+@article{ye2024reevo,
+  title={Reevo: Large language models as hyper-heuristics with reflective evolution},
+  author={Ye, Haoran and Wang, Jiarui and Cao, Zhiguang and Berto, Federico and Hua, Chuanbo and Kim, Haeyeon and Park, Jinkyoo and Song, Guojie},
+  journal={Advances in neural information processing systems},
+  volume={37},
+  pages={43571--43608},
+  year={2024}
+}
+
+@inproceedings{yang-etal-2018-hotpotqa,
+    title = "{H}otpot{QA}: A Dataset for Diverse, Explainable Multi-hop Question Answering",
+    author = "Yang, Zhilin  and
+      Qi, Peng  and
+      Zhang, Saizheng  and
+      Bengio, Yoshua  and
+      Cohen, William  and
+      Salakhutdinov, Ruslan  and
+      Manning, Christopher D.",
+    editor = "Riloff, Ellen  and
+      Chiang, David  and
+      Hockenmaier, Julia  and
+      Tsujii, Jun{'}ichi",
+    booktitle = "Proceedings of the 2018 Conference on Empirical Methods in Natural Language Processing",
+    month = oct # "-" # nov,
+    year = "2018",
+    address = "Brussels, Belgium",
+    publisher = "Association for Computational Linguistics",
+    url = "https://aclanthology.org/D18-1259/",
+    doi = "10.18653/v1/D18-1259",
+    pages = "2369--2380",
+    abstract = "Existing question answering (QA) datasets fail to train QA systems to perform complex reasoning and provide explanations for answers. We introduce HotpotQA, a new dataset with 113k Wikipedia-based question-answer pairs with four key features: (1) the questions require finding and reasoning over multiple supporting documents to answer; (2) the questions are diverse and not constrained to any pre-existing knowledge bases or knowledge schemas; (3) we provide sentence-level supporting facts required for reasoning, allowing QA systems to reason with strong supervision and explain the predictions; (4) we offer a new type of factoid comparison questions to test QA systems' ability to extract relevant facts and perform necessary comparison. We show that HotpotQA is challenging for the latest QA systems, and the supporting facts enable models to improve performance and make explainable predictions."
+}
+
+@article{yao2022webshop,
+  title={Webshop: Towards scalable real-world web interaction with grounded language agents},
+  author={Yao, Shunyu and Chen, Howard and Yang, John and Narasimhan, Karthik},
+  journal={Advances in Neural Information Processing Systems},
+  volume={35},
+  pages={20744--20757},
+  year={2022}
+}
