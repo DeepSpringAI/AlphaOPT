@@ -134,14 +134,28 @@ def _build_client(model: str, service: str):
     openai_key = config.api_keys.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY")
     
     if service and service.lower() != "null":
-        # Treat non-null service as OpenRouter (OpenAI-compatible endpoint)
         from openai import OpenAI
-        base_url = "https://openrouter.ai/api/v1"
 
-        if not openrouter_key:
-            raise RuntimeError("OPEN_ROUTER_KEY is not set in config or environment")
-        client = OpenAI(api_key=openrouter_key, base_url=base_url)
-        return "openrouter", client
+        service_lower = service.lower()
+
+        if service_lower == "openrouter":
+            base_url = "https://openrouter.ai/api/v1"
+            if not openrouter_key:
+                raise RuntimeError("OPEN_ROUTER_KEY is not set in config or environment")
+            client = OpenAI(api_key=openrouter_key, base_url=base_url)
+            return "openrouter", client
+
+        # Allow a custom OpenAI-compatible endpoint such as a local vLLM / LM Studio / proxy server.
+        if service_lower.startswith("http://") or service_lower.startswith("https://"):
+            # Some local OpenAI-compatible servers do not enforce auth; the OpenAI SDK still
+            # requires an API key argument, so fall back to a harmless placeholder.
+            api_key = openai_key or os.getenv("OPENAI_API_KEY") or "EMPTY"
+            client = OpenAI(api_key=api_key, base_url=service)
+            return "openai", client
+
+        raise RuntimeError(
+            f"Unsupported service value: {service}. Use 'openrouter', 'null', or a full http(s) OpenAI-compatible base URL."
+        )
 
     # Gemini family
     if "gemini" in model.lower():
@@ -548,4 +562,3 @@ def extract_json_array(text: str):
             print("Last scanned fragment (prefix):\n", last_fragment[:1000])
         print("Error:", repr(e))
         raise
-
