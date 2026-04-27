@@ -870,13 +870,13 @@ if __name__ == "__main__":
     OmegaConf.resolve(config)
 
     # Initialize the LLM agents
-    llm_opt = ProgramGenerator(model=config.base_model, service=config.service, temperature=0)
-    llm_opt_online = ProgramGenerator(model=config.base_model, service=config.service, temperature=0)
-    llm_diag = ProgramDiagnostic(model=config.advanced_model, service=config.service, temperature=0)
-    llm_ins = InsightExtractor(model=config.advanced_model, service=config.service, temperature=0.7)
+    llm_opt = ProgramGenerator(model=config.base_model, service=config.base_service, temperature=0)
+    llm_opt_online = ProgramGenerator(model=config.base_model, service=config.base_service, temperature=0)
+    llm_diag = ProgramDiagnostic(model=config.advanced_model, service=config.advanced_service, temperature=0)
+    llm_ins = InsightExtractor(model=config.advanced_model, service=config.advanced_service, temperature=0.7)
 
     if config.params.max_solution_attempts > 1:
-        llm_opt_online = ProgramGenerator(model=config.base_model, temperature=0.7)
+        llm_opt_online = ProgramGenerator(model=config.base_model, service=config.base_service, temperature=0.7)
 
     # Load task recorded previously
     train_tasks = DataLoader(config.file_paths.train_data_path, mode="learn", filter_success_num=None, reset=True) 
@@ -895,7 +895,7 @@ if __name__ == "__main__":
     iter = 0
 
     # Update library retriever
-    llm_retri = LibraryRetrieval(lib=library, model=config.base_model, service=config.service, temperature=0)
+    llm_retri = LibraryRetrieval(lib=library, model=config.base_model, service=config.base_service, temperature=0)
 
     #* Library Online Learning
     iter_metrics = run_library_online_learning(

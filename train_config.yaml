@@ -20,8 +20,8 @@ params:
   max_verify_attempts: 3
   variant_num: 5  # the number of refined condition 
   
-dataset: train_data_4o_new_300 
-output_folder: train_data_300_flash_latest 
+dataset: train_data_all_452
+output_folder: train_data_all_452_flash
 file_paths:
   train_data_path: ./data/optimization_tasks/train/${dataset}.json
   train_output_dir: ./learning/${output_folder}/

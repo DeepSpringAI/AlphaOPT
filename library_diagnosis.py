@@ -859,24 +859,29 @@ if __name__ == "__main__":
     OmegaConf.resolve(config)
 
     # Initialize the LLM agents
-    llm_opt = ProgramGenerator(model=config.base_model, service=config.service, temperature=0)
-    llm_diag = ProgramDiagnostic(model=config.advanced_model, service=config.service, temperature=0)
-    llm_ins = InsightExtractor(model=config.advanced_model, service=config.service, temperature=0.7)
+    llm_opt = ProgramGenerator(model=config.base_model, service=config.base_service, temperature=0)
+    llm_diag = ProgramDiagnostic(model=config.advanced_model, service=config.advanced_service, temperature=0)
+    llm_ins = InsightExtractor(model=config.advanced_model, service=config.advanced_service, temperature=0.7)
 
     # 0 (start from online learning), 1 (start from library diagnosis at iter 1)
     start_iter = config.start_iter 
     # Load task recorded previously
-    train_dataset_path = f"learning/{config.dataset}/train_tasks_record_iter{start_iter-1}.json"
+    if start_iter == 1:
+        train_dataset_path = f"{config.file_paths.train_output_dir}/train_tasks_record_base.json"
+    else:
+        train_dataset_path = f"{config.file_paths.train_output_dir}/train_tasks_record_diag_iter{start_iter-1}.json"
     train_tasks = DataLoader(train_dataset_path, mode="learn", filter_success_num=None, reset=False)
 
     # Load previous library
     if start_iter == 1:
         library_path = f"{config.file_paths.lib_dir}/library_base.json"
+        taxonomy_path = f"{config.file_paths.lib_dir}/latest_taxonomy_base.json"
     else:
         library_path = f"{config.file_paths.lib_dir}/library_refine_iter{start_iter-1}.json"
+        taxonomy_path = f"{config.file_paths.lib_dir}/latest_taxonomy_diag_iter{start_iter-1}.json"
     library = ExperienceLibrary.from_json_file(
                                 library_path = library_path,
-                                taxonomy_path = f"{config.file_paths.lib_dir}/latest_taxonomy_iter{start_iter-1}.json")
+                                taxonomy_path = taxonomy_path)
 
     # Track iteration metrics
     with open(config.file_paths.metrics_log_path, "r") as f:
@@ -891,7 +896,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     #* Library Diagnosis
-    llm_retri = LibraryRetrieval(lib=library, model=config.base_model, service=config.service, temperature=0)
+    llm_retri = LibraryRetrieval(lib=library, model=config.base_model, service=config.base_service, temperature=0)
     iter_metrics = run_library_diagnosis(
         start_iter, 
         train_tasks, 

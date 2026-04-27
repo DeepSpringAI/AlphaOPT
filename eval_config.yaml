@@ -1,7 +1,8 @@
-datasets: [nlp4lp, nl4opt, industryor, mamo_complex]  # [logior, optibench] [nlp4lp, nl4opt, industryor, mamo_complex]
-data_path_template:  ./data/optimization_tasks/split/${dataset}_test.json 
-library_path:  ./data/experience_library/iterations/train_data_all_explore_4o/library_refine_iter4.json
-output_folder_template: ${dataset}_raw_4o
+datasets: [nlp4lp_test, nl4opt_test, industryor_test, logior, optibench]
+data_path_template: ./data/optimization_tasks/split/test_data/${dataset}.json
+library_path: ./data/experience_library/library.json
+taxonomy_path: ./data/experience_library/latest_taxonomy.json
+output_folder_template: ${dataset}_eval
 model: openai/gpt-4o 
 service: openrouter # null
 n_runs: 3

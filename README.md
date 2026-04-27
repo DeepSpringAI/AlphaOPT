@@ -41,8 +41,8 @@ Self-Improve-LLM-OPT/
 ├── library_diagnosis.py        # Library diagnosis
 ├── library_online_learning.py  # Online learning
 ├── library_refinement.py       # Library refinement
-├── train_params.yaml          # Training parameter config
-├── eval_params.yaml           # Evaluation parameter config
+├── train_config.yaml          # Training parameter config
+├── eval_config.yaml           # Evaluation parameter config
 └── requirements.txt           # Dependencies list
 ```
 
@@ -57,7 +57,7 @@ pip install -r requirements.txt
 
 **2. API Key Configuration**
 
-Configure LLM API keys in `train_params.yaml` and `eval_params.yaml`:
+Configure LLM API keys in `train_config.yaml` and `eval_config.yaml`:
 
 **Supported LLM Interfaces:**
 - OpenAI GPT series
@@ -74,7 +74,7 @@ Configure LLM API keys in `train_params.yaml` and `eval_params.yaml`:
     **Configuration Example:**
     
     ```yaml
-    # train_params.yaml
+    # train_config.yaml
     base_model: google/gemini-2.5-flash   # or e.g., openai/gpt-4o
     advanced_model: openai/gpt-4o         # or e.g., gemini-2.5-pro
     base_service: openrouter              # or null for direct API
@@ -85,7 +85,7 @@ Configure LLM API keys in `train_params.yaml` and `eval_params.yaml`:
       GEMINI_API_KEY: "your-gemini-key"
       OPENAI_API_KEY: "your-openai-key"
 
-    # eval_params.yaml
+    # eval_config.yaml
     model: openai/gpt-4o
     service: openrouter  # or null for direct API
     temperature: 0.0
@@ -93,10 +93,10 @@ Configure LLM API keys in `train_params.yaml` and `eval_params.yaml`:
 
 **3. Experiment Settings**
 
-Configure training and evaluation parameters in `train_params.yaml` and `eval_params.yaml`:
+Configure training and evaluation parameters in `train_config.yaml` and `eval_config.yaml`:
 
-- **Training Parameters** (`train_params.yaml`): `num_iterations`, `batch_size`, `max_solution_attempts` (the maximum number of attempts for solution generation), `max_verify_attempts` (the maximum number of insight self-verification), etc.
-- **Evaluation Parameters** (`eval_params.yaml`): `data_path` (the file path of the evaluation dataset),  `library_path` (the file path of the library to use), `ablation` (including parameters for ablation study, e.g., enable self-debug component). 
+- **Training Parameters** (`train_config.yaml`): `num_iterations`, `batch_size`, `max_solution_attempts` (the maximum number of attempts for solution generation), `max_verify_attempts` (the maximum number of insight self-verification), etc.
+- **Evaluation Parameters** (`eval_config.yaml`): `data_path` (the file path of the evaluation dataset), `library_path` (the file path of the library to use), `ablation` (including parameters for ablation study, e.g., enable self-debug component). 
 
 
 ### Example Data

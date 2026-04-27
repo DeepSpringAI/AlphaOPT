@@ -170,7 +170,7 @@ def load_config(config_file: str) -> dict:
     #     config = yaml.safe_load(f)  
     #* Configure
     from omegaconf import OmegaConf
-    config = OmegaConf.load("eval_config.yaml")
+    config = OmegaConf.load(config_file)
 
     #* Generate a timestamp and append it to output_folder
     # ts = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -276,9 +276,13 @@ def evaluate_single_dataset(config: Any, dataset: str) -> dict:
     use_library = bool(dataset_config.library_path)
 
     if use_library:
-        # Load trained experience library
+        # Load trained experience library, optionally with the paired taxonomy file.
         print("Loading Library...")
-        library = ExperienceLibrary.from_json_file(dataset_config.library_path)
+        taxonomy_path = getattr(dataset_config, "taxonomy_path", None)
+        library = ExperienceLibrary.from_json_file(
+            dataset_config.library_path,
+            taxonomy_path=taxonomy_path,
+        )
     else:
         print("Do task without Library...")
         library = None
@@ -503,7 +507,7 @@ def evaluate_single_dataset(config: Any, dataset: str) -> dict:
 
 def main() -> None:
     # Read the configuration file
-    config = load_config("./eval_params.yaml")
+    config = load_config("./eval_config.yaml")
 
     # Get datasets list - support both single string and list
     # Check for 'datasets' first, then fall back to 'dataset' for backward compatibility
