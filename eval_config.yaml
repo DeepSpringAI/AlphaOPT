@@ -1,4 +1,5 @@
-datasets: [nlp4lp_test, nl4opt_test, industryor_test, logior, optibench, miplib_nl]
+# datasets: [miplib_nl, nlp4lp_test, nl4opt_test, industryor_test, logior, optibench]
+datasets: [miplib_nl, optmath_bench]
 data_path_template: ./data/optimization_tasks/split/test_data/${dataset}.json
 library_path: ./data/experience_library/library.json
 taxonomy_path: ./data/experience_library/latest_taxonomy.json
