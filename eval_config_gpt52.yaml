@@ -1,0 +1,26 @@
+# Paper-aligned evaluation setup (no retraining), model-swapped to GPT-5.2
+
+datasets: [nlp4lp_test, nl4opt_test, industryor_test, logior, optibench, optmath_bench]
+data_path_template: ./data/optimization_tasks/split/test_data/${dataset}.json
+
+library_path: ./data/experience_library/library.json
+taxonomy_path: ./data/experience_library/latest_taxonomy_new.json
+
+output_folder_template: ${dataset}_eval_gpt52
+model: gpt-5.2
+service: http://127.0.0.1:4010/v1
+
+n_runs: 3
+temperature: 0.0
+pass_at_k: 1
+
+ablation:
+  taxonomy: true
+  rewrite: false
+  include_example: true
+  include_program_insight: true
+  max_debug_retry: 5
+
+  sweep_one_by_one: false
+  sweep_params: [include_example]
+  include_base: false

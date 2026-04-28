@@ -506,8 +506,18 @@ def evaluate_single_dataset(config: Any, dataset: str) -> dict:
 
 
 def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run AlphaOPT evaluation")
+    parser.add_argument(
+        "--config",
+        default="./eval_config.yaml",
+        help="Path to evaluation config YAML file (default: ./eval_config.yaml)",
+    )
+    args = parser.parse_args()
+
     # Read the configuration file
-    config = load_config("./eval_config.yaml")
+    config = load_config(args.config)
 
     # Get datasets list - support both single string and list
     # Check for 'datasets' first, then fall back to 'dataset' for backward compatibility

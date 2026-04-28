@@ -15,7 +15,7 @@ api_keys:
 params:
   num_iterations: 1
   batch_size: 12
-  tolerance: 0.1
+  tolerance: 1e-6
   max_solution_attempts: 1
   max_verify_attempts: 3
   variant_num: 5  # the number of refined condition 
