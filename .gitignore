@@ -219,6 +219,9 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# Local credentials (never commit)
+config/AlphaOPT-credentials.toml
+
 # local output folders
 /logs/
 /scripts/

@@ -367,6 +367,15 @@ def self_verify_retrieval_and_success(
 
 
 def save_checkpoint(library, tasks, metrics, paths, suffix):
+    # Always create output dirs: empty library skips library.save (which makedirs), but we still
+    # write tasks / metrics under train_output_dir and metrics_log_path.
+    os.makedirs(paths.train_output_dir, exist_ok=True)
+    os.makedirs(paths.lib_dir, exist_ok=True)
+    metrics_path = paths.metrics_log_path
+    metrics_dir = os.path.dirname(str(metrics_path))
+    if metrics_dir:
+        os.makedirs(metrics_dir, exist_ok=True)
+
     if library:
         # Save latest library and updated taxonomy
         library.save(f"{paths.lib_dir}/library_{suffix}.json")

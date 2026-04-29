@@ -43,21 +43,48 @@ Self-Improve-LLM-OPT/
 ├── library_refinement.py       # Library refinement
 ├── train_config.yaml          # Training parameter config
 ├── eval_config.yaml           # Evaluation parameter config
-└── requirements.txt           # Dependencies list
+├── pyproject.toml             # Dependencies (managed with uv)
+├── uv.lock                    # Locked dependency versions
+├── Makefile                   # sync, train, eval, check-proxy
+└── config/                    # Example TOML for credentials (copy to ~/.config)
 ```
 
 ### 2. Environment Setup 
 **1. Install Dependencies**
 
-This project is designed to run with Python 3.13.5. Install the dependencies with:
+Requires Python **3.11–3.13**. Install [uv](https://docs.astral.sh/uv/), then from the repo root:
 
 ```bash
-pip install -r requirements.txt
+make sync
+# or: uv sync
 ```
+
+Optional extras (notebooks, extra retrieval libs, alternate solvers):
+
+```bash
+make sync-extras
+# or: uv sync --all-extras
+```
+
+Run training or evaluation:
+
+```bash
+make train
+make eval
+```
+
+If you use a local OpenAI-compatible proxy (for example on port **8801**), optional smoke-check:
+
+```bash
+make check-proxy        # fails if nothing responds at http://localhost:8801/health
+make train-with-proxy   # runs training only after the check passes
+```
+
+Point `base_service` / `advanced_service` at your proxy base URL (for example `http://localhost:8801/v1`) in `train_config.yaml` when using that setup.
 
 **2. API Key Configuration**
 
-Configure LLM API keys in `train_config.yaml` and `eval_config.yaml`:
+Configure LLM API keys in `train_config.yaml` and `eval_config.yaml`, **or** copy `config/AlphaOPT-credentials.example.toml` to **`~/.config/AlphaOPT-credentials.toml`** and fill in `[api_keys]`. Precedence: environment variables (if set), then YAML `api_keys`, then `~/.config/AlphaOPT-credentials.toml`.
 
 **Supported LLM Interfaces:**
 - OpenAI GPT series
