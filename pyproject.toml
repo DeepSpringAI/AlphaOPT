@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "alphaopt"
+version = "0.1.0"
+description = "AlphaOPT: optimization programs with a self-improving LLM experience library"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { text = "MIT" }
+dependencies = [
+  "google-genai>=1.0.0",
+  "google-generativeai>=0.8.0",
+  "numpy>=1.26.0,<3",
+  "omegaconf>=2.3.0",
+  "openai>=1.0.0",
+  "pandas>=2.2.2",
+  "pulp>=2.7",
+  "python-dotenv>=1.0.0",
+  "pyyaml>=6.0",
+  "regex>=2024.0.0",
+  "requests>=2.32.2",
+  "rich>=13.3.5",
+  "tqdm>=4.66.0",
+]
+
+[project.optional-dependencies]
+notebooks = ["jupyter", "ipykernel", "matplotlib"]
+retrieval = ["hdbscan>=0.8.0", "scikit-learn>=1.4.0", "sentence-transformers>=3.0.0"]
+# Legacy / alternative solvers — kept for comparison runs only; the active pipeline uses PuLP+CBC.
+legacy-solvers = ["gurobipy>=12.0.2", "coptpy", "pyscipopt"]
+dev = ["pytest>=8.0.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

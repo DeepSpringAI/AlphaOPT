@@ -7,6 +7,8 @@ from copy import deepcopy
 import threading
 from dotenv import load_dotenv
 
+from src.credentials import load_credentials_toml
+
 #* Configure
 from omegaconf import OmegaConf
 config = OmegaConf.load("train_config.yaml")
@@ -104,6 +106,30 @@ def _estimate_cost(
     return prompt_cost + completion_cost
 
 
+def _is_gpt5_family_model_id(model_id: str) -> bool:
+    """True for gpt-5, gpt-5.2, gpt-5.4, openai/gpt-5, etc."""
+    tail = (model_id or "").split("/")[-1].lower()
+    return tail.startswith("gpt-5")
+
+
+def _apply_gpt5_openai_chat_params(model: str, vendor: str, create_params: dict) -> dict:
+    """
+    Azure / LiteLLM reject non-1 temperature for GPT-5 family; omit frequency_penalty.
+    Aligns with llm-api-proxy's _normalize_temperature_for_gpt5_family.
+    """
+    if vendor not in ("openai", "openrouter") or not _is_gpt5_family_model_id(model):
+        return create_params
+    out = dict(create_params)
+    out.pop("frequency_penalty", None)
+    if "temperature" in out and out["temperature"] is not None:
+        try:
+            if float(out["temperature"]) != 1.0:
+                out["temperature"] = 1.0
+        except (TypeError, ValueError):
+            out["temperature"] = 1.0
+    return out
+
+
 def get_token_usage() -> Dict[str, Dict[str, float]]:
     """
     Return a deep copy of current global token usage snapshot.
@@ -127,11 +153,21 @@ def _build_client(model: str, service: str):
     Return (vendor, client) according to the model name
     """
     load_dotenv()
-    
-    # Get API keys from config or fallback to environment variables
-    openrouter_key = config.api_keys.OPEN_ROUTER_KEY or os.getenv("OPEN_ROUTER_KEY")
-    gemini_key = config.api_keys.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY")
-    openai_key = config.api_keys.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY")
+    toml_keys = load_credentials_toml()
+
+    def _api_key(name: str, yaml_val) -> str | None:
+        env_v = os.getenv(name)
+        if env_v:
+            return env_v
+        y = (yaml_val or "").strip() if yaml_val is not None else ""
+        if y:
+            return y
+        v = toml_keys.get(name)
+        return v if v else None
+
+    openrouter_key = _api_key("OPEN_ROUTER_KEY", config.api_keys.OPEN_ROUTER_KEY)
+    gemini_key = _api_key("GEMINI_API_KEY", config.api_keys.GEMINI_API_KEY)
+    openai_key = _api_key("OPENAI_API_KEY", config.api_keys.OPENAI_API_KEY)
     
     if service and service.lower() != "null":
         from openai import OpenAI
@@ -141,7 +177,10 @@ def _build_client(model: str, service: str):
         if service_lower == "openrouter":
             base_url = "https://openrouter.ai/api/v1"
             if not openrouter_key:
-                raise RuntimeError("OPEN_ROUTER_KEY is not set in config or environment")
+                raise RuntimeError(
+                    "OPEN_ROUTER_KEY is not set. Use env OPEN_ROUTER_KEY, train_config.yaml "
+                    "api_keys.OPEN_ROUTER_KEY, or [api_keys] in ~/.config/AlphaOPT-credentials.toml"
+                )
             client = OpenAI(api_key=openrouter_key, base_url=base_url)
             return "openrouter", client
 
@@ -149,7 +188,7 @@ def _build_client(model: str, service: str):
         if service_lower.startswith("http://") or service_lower.startswith("https://"):
             # Some local OpenAI-compatible servers do not enforce auth; the OpenAI SDK still
             # requires an API key argument, so fall back to a harmless placeholder.
-            api_key = openai_key or os.getenv("OPENAI_API_KEY") or "EMPTY"
+            api_key = openai_key or "EMPTY"
             client = OpenAI(api_key=api_key, base_url=service)
             return "openai", client
 
@@ -213,9 +252,9 @@ def call_llm_and_parse_with_retry(
                 "messages": msgs,
                 "temperature": temperature
             }
-            # Add frequency_penalty for OpenAI vendor only
             if vendor == "openai":
                 create_params["frequency_penalty"] = 0.5
+            create_params = _apply_gpt5_openai_chat_params(model, vendor, create_params)
             completion = client.chat.completions.create(**create_params)
 
             # Token usage from Responses API

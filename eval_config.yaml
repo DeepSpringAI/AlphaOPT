@@ -4,25 +4,19 @@ data_path_template: ./data/optimization_tasks/split/test_data/${dataset}.json
 library_path: ./data/experience_library/library.json
 taxonomy_path: ./data/experience_library/latest_taxonomy.json
 output_folder_template: ${dataset}_eval
-model: gpt-5 
-service: http://127.0.0.1:4010/v1 # null
+model: gpt-5
+service: "http://127.0.0.1:8801/v1"
 n_runs: 3
 temperature: 0.0
 pass_at_k: 1
 
 ablation:
-  taxonomy: true              # Whether to enable taxonomy-based retrieval
-  rewrite: false # true              # Whether to enable insight rewriting
-  include_example: true       # Whether to include insight examples
-  include_program_insight: true  # Whether to include code implementation insight
-  max_debug_retry: 5          # Whether to enable self-debug and number of times
+  taxonomy: true
+  rewrite: false
+  include_example: true
+  include_program_insight: true
+  max_debug_retry: 5
 
-  # Ablation
-  # When enabled, runs evaluation by setting each of the following params to false one at a time,
-  # based on the current configuration:
-  # - taxonomy: false
-  # - include_example: false
-  # - include_program_insight: false
   sweep_one_by_one: false
-  sweep_params: [include_example]  # include_example, include_program_insight
-  include_base: false  # Whether to also run with the current configuration unchanged
+  sweep_params: [include_example]
+  include_base: false

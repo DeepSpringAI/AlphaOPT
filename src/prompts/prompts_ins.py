@@ -3,7 +3,7 @@ You are an expert in Industrial Engineering and Operations Research teaching gra
 
 You are given:
 1. A problem description for the optimization task
-2. A mathematical model proposed by your colleague which failed to yield an optimal solution when solved with the Gurobi optimizer (hereafter referred to as *the failed mathematical model*)
+2. A mathematical model proposed by your colleague which failed to yield an optimal solution when solved with the CBC solver via PuLP (hereafter referred to as *the failed mathematical model*)
 3. The gold-standard program, which embodies the correct mathematical formulation of the optimization task
 4. Taxonomy dictionaries for the problem domain and formulation components
 

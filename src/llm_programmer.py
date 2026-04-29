@@ -96,7 +96,7 @@ class ProgramGenerator:
                 timeout=timeout_sec # Set the maximum run time
             )
 
-            # Extract Gurobi's objVal (optimal objective value) from stdout
+            # Extract the solver's objective value from stdout (footer prints "Optimal value: ...")
             output = result.stdout
             match = re.search(r"Optimal value\s*[:=]\s*([0-9.+-eE]+)", output)
 
@@ -398,16 +398,20 @@ class ProgramGenerator:
 
         return is_optimal, gold_standard_program
 
-# Standard footer to append
+# Standard footer to append. Assumes the generated program names the problem `model`
+# and assigns the result of model.solve(...) to a variable named `status`. The printed
+# "Optimal value: <num>" line is what execute_code()'s regex parses downstream.
 formatted_output = (
-    "\n\nif model.Status == GRB.OPTIMAL:\n"
-    "    print(\"Optimal value:\", model.ObjVal)\n"
-    "elif model.Status == GRB.INFEASIBLE:\n"
+    "\n\nimport pulp as _pulp_footer\n"
+    "_status_str = _pulp_footer.LpStatus[status]\n"
+    "if _status_str == 'Optimal':\n"
+    "    print(\"Optimal value:\", _pulp_footer.value(model.objective))\n"
+    "elif _status_str == 'Infeasible':\n"
     "    print(\"Model is infeasible.\")\n"
-    "elif model.Status == GRB.UNBOUNDED:\n"
+    "elif _status_str == 'Unbounded':\n"
     "    print(\"Model is unbounded.\")\n"
     "else:\n"
-    "    print(\"Other status:\", model.Status)\n"
+    "    print(\"Other status:\", _status_str)\n"
 )
 
 

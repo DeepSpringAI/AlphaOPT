@@ -219,6 +219,9 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# Local credentials (never commit)
+config/AlphaOPT-credentials.toml
+
 # local output folders
 /logs/
 /scripts/
@@ -231,3 +234,6 @@ __marimo__/
 
 # cache
 /__pycache__/
+
+# Local Claude / IDE worktrees
+.claude/

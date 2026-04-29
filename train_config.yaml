@@ -1,16 +1,18 @@
-base_model: google/gemini-2.5-flash  
-advanced_model: google/gemini-2.5-flash
-base_service: openrouter # null for direct API calls
-advanced_service: openrouter
+# All LLM calls use gpt-5 through llm-api-proxy (OpenAI-compatible /v1).
+# Ensure llm-api-proxy is running; default listen port 8801 — see your LLMProxy-credentials.toml.
+base_model: gpt-5
+advanced_model: gpt-5
+base_service: "http://127.0.0.1:8801/v1"
+advanced_service: "http://127.0.0.1:8801/v1"
 verbose: false
 start_iter: 0
-data_slice: 
+data_slice:
 
-# API Keys
+# API Keys (OPENAI_API_KEY can be a placeholder like EMPTY if the proxy does not require it; prefer real key in ~/.config/AlphaOPT-credentials.toml)
 api_keys:
-  OPEN_ROUTER_KEY: 
-  GEMINI_API_KEY: 
-  OPENAI_API_KEY:    # Set your OpenAI API key here 
+  OPEN_ROUTER_KEY:
+  GEMINI_API_KEY:
+  OPENAI_API_KEY:
 
 params:
   num_iterations: 1
@@ -18,10 +20,10 @@ params:
   tolerance: 1e-6
   max_solution_attempts: 1
   max_verify_attempts: 3
-  variant_num: 5  # the number of refined condition 
-  
-dataset: train_data_all_452
-output_folder: train_data_all_452_flash
+  variant_num: 5  # the number of refined condition
+
+dataset: train_data_all_452_pulp
+output_folder: train_data_all_452_pulp_flash
 file_paths:
   train_data_path: ./data/optimization_tasks/train/${dataset}.json
   train_output_dir: ./learning/${output_folder}/
@@ -29,14 +31,19 @@ file_paths:
   metrics_log_path: ./learning/${output_folder}/iteration_metrics.json
 
 ablation:
-  taxonomy: true                 # Whether to enable taxonomy-based retrieval
-  rewrite: false                 # Whether to enable insight rewriting
-  include_example: true          # Whether to include insight examples
-  include_program_insight: true  # Whether to include code implementation insight
-  max_debug_retry: 3             # Whether to enable self-debug and number of times
+  taxonomy: true
+  rewrite: false
+  include_example: true
+  include_program_insight: true
+  max_debug_retry: 3
 
-# Token pricing (USD per 1M tokens)
+# Token pricing (USD per 1M tokens) — rough placeholder for gpt-5; override when you have list prices
 pricing:
+  openai:
+    "gpt-5":
+      prompt_per_million: 2.00
+      completion_per_million: 8.00
+
   gemini:
     gemini-2.5-pro:
       prompt_per_million: 1.25
@@ -45,13 +52,7 @@ pricing:
       prompt_per_million: 0.30
       completion_per_million: 2.50
 
-  openai:
-    gpt-4o:
-      prompt_per_million: 2.50
-      completion_per_million: 10.0
-    gpt-4o-mini:
-      prompt_per_million: 0.15
-      completion_per_million: 0.60
-    gpt-4.1:
-      prompt_per_million: 2.00
-      completion_per_million: 8.00
+  openrouter:
+    default:
+      prompt_per_million: 0.0
+      completion_per_million: 0.0

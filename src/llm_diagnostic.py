@@ -80,7 +80,7 @@ class ProgramDiagnostic:
                 timeout=timeout_sec # Set the maximum run time
             )
 
-            # Extract Gurobi's objVal (optimal objective value) from stdout
+            # Extract the solver's objective value from stdout (footer prints "Optimal value: ...")
             output = result.stdout
             match = re.search(r"Optimal value\s*[:=]\s*([0-9.+-eE]+)", output)
 
