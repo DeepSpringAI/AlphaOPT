@@ -17,11 +17,11 @@ source = { editable = "." }
 dependencies = [
     { name = "google-genai" },
     { name = "google-generativeai" },
-    { name = "gurobipy" },
     { name = "numpy" },
     { name = "omegaconf" },
     { name = "openai" },
     { name = "pandas" },
+    { name = "pulp" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "regex" },
@@ -34,6 +34,11 @@ dependencies = [
 dev = [
     { name = "pytest" },
 ]
+legacy-solvers = [
+    { name = "coptpy" },
+    { name = "gurobipy" },
+    { name = "pyscipopt" },
+]
 notebooks = [
     { name = "ipykernel" },
     { name = "jupyter" },
@@ -44,17 +49,13 @@ retrieval = [
     { name = "scikit-learn" },
     { name = "sentence-transformers" },
 ]
-solvers = [
-    { name = "coptpy" },
-    { name = "pyscipopt" },
-]
 
 [package.metadata]
 requires-dist = [
-    { name = "coptpy", marker = "extra == 'solvers'" },
+    { name = "coptpy", marker = "extra == 'legacy-solvers'" },
     { name = "google-genai", specifier = ">=1.0.0" },
     { name = "google-generativeai", specifier = ">=0.8.0" },
-    { name = "gurobipy", specifier = ">=12.0.2" },
+    { name = "gurobipy", marker = "extra == 'legacy-solvers'", specifier = ">=12.0.2" },
     { name = "hdbscan", marker = "extra == 'retrieval'", specifier = ">=0.8.0" },
     { name = "ipykernel", marker = "extra == 'notebooks'" },
     { name = "jupyter", marker = "extra == 'notebooks'" },
@@ -63,7 +64,8 @@ requires-dist = [
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "pandas", specifier = ">=2.2.2" },
-    { name = "pyscipopt", marker = "extra == 'solvers'" },
+    { name = "pulp", specifier = ">=2.7" },
+    { name = "pyscipopt", marker = "extra == 'legacy-solvers'" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -74,7 +76,7 @@ requires-dist = [
     { name = "sentence-transformers", marker = "extra == 'retrieval'", specifier = ">=3.0.0" },
     { name = "tqdm", specifier = ">=4.66.0" },
 ]
-provides-extras = ["notebooks", "retrieval", "solvers", "dev"]
+provides-extras = ["notebooks", "retrieval", "legacy-solvers", "dev"]
 
 [[package]]
 name = "annotated-doc"
@@ -2313,6 +2315,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/20/e5/16ff212c1e452235a90aeb09066144d0c5a6a8c0834397e03f5224495c4e/ptyprocess-0.7.0.tar.gz", hash = "sha256:5c5d0a3b48ceee0b48485e0c26037c0acd7d29765ca3fbb5cb3831d347423220", size = 70762, upload-time = "2020-12-28T15:15:30.155Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/22/a6/858897256d0deac81a172289110f31629fc4cee19b6f01283303e18c8db3/ptyprocess-0.7.0-py2.py3-none-any.whl", hash = "sha256:4b41f3967fce3af57cc7e94b888626c18bf37a083e3651ca8feeb66d492fef35", size = 13993, upload-time = "2020-12-28T15:15:28.35Z" },
+]
+
+[[package]]
+name = "pulp"
+version = "3.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/16/1c/d880b739b841a8aa81143091c9bdda5e72e226a660aa13178cb312d4b27f/pulp-3.3.0.tar.gz", hash = "sha256:7eb99b9ce7beeb8bbb7ea9d1c919f02f003ab7867e0d1e322f2f2c26dd31c8ba", size = 16301847, upload-time = "2025-09-18T08:14:57.552Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/99/6c/64cafaceea3f99927e84b38a362ec6a8f24f33061c90bda77dfe1cd4c3c6/pulp-3.3.0-py3-none-any.whl", hash = "sha256:dd6ad2d63f196d1254eddf9dcff5cd224912c1f046120cb7c143c5b0eda63fae", size = 16387700, upload-time = "2025-09-18T08:14:53.368Z" },
 ]
 
 [[package]]

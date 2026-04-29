@@ -234,3 +234,6 @@ config/AlphaOPT-credentials.toml
 
 # cache
 /__pycache__/
+
+# Local Claude / IDE worktrees
+.claude/
