@@ -3,7 +3,7 @@ You are an expert in Industrial Engineering and Operations Research.
 
 You are given:
 1. A problem description for the optimization task
-2. A mathematical model proposed by your colleague which failed to yield an optimal solution when solved with the Gurobi optimizer (hereafter referred to as *the failed mathematical model*)
+2. A mathematical model proposed by your colleague which failed to yield an optimal solution when solved with the CBC solver via PuLP (hereafter referred to as *the failed mathematical model*)
 3. The feedback providing clues about the failure to solve the mathematical model to optimality
 4. The gold-standard program, which embodies the correct mathematical formulation of the optimization task
 
@@ -65,7 +65,7 @@ You are an expert in Industrial Engineering and Operations Research.
 
 You are given:
 1. A problem description for the optimization task
-2. A mathematical model proposed by your colleague which failed to yield an optimal solution when solved with the Gurobi optimizer (hereafter referred to as *the failed mathematical model*)
+2. A mathematical model proposed by your colleague which failed to yield an optimal solution when solved with the CBC solver via PuLP (hereafter referred to as *the failed mathematical model*)
 3. A diagnostic report on the proposed mathematical model, identifying **all formulation issues** that prevent optimality.
 4. A collection of insights your colleague previously consulted to generate the mathematical model, each insight includes:
     - insight_id: the unique ID for this insight
@@ -144,7 +144,7 @@ You are an expert in Industrial Engineering and Operations Research.
 
 You are given:
 1. A problem description for the optimization task
-2. A mathematical model proposed by your colleague that failed to yield an optimal solution when solved with the Gurobi optimizer (hereafter referred to as *the failed mathematical model*)
+2. A mathematical model proposed by your colleague that failed to yield an optimal solution when solved with the CBC solver via PuLP (hereafter referred to as *the failed mathematical model*)
 3. A diagnostic report on the proposed mathematical model, identifying the specific issue that prevents optimality
 
 
@@ -229,7 +229,7 @@ You are an expert in Industrial Engineering and Operations Research.
 
 You are given:
 1. A problem description for the optimization task
-2. A mathematical model proposed by your colleague which failed to yield an optimal solution when solved with the Gurobi optimizer (hereafter referred to as *the failed mathematical model*)
+2. A mathematical model proposed by your colleague which failed to yield an optimal solution when solved with the CBC solver via PuLP (hereafter referred to as *the failed mathematical model*)
 3. A diagnostic report on the proposed mathematical model, identifying the specific issue that prevents optimality
 4. A collection of insights. Each insight includes:
     - insight_id: the unique identifier of the insight
@@ -345,7 +345,7 @@ You are an expert in Industrial Engineering and Operations Research.
 
 You are given:
 1. A problem description for the optimization task
-2. A mathematical model proposed by your colleague which failed to yield an optimal solution when solved with the Gurobi optimizer (hereafter referred to as *the failed mathematical model*)
+2. A mathematical model proposed by your colleague which failed to yield an optimal solution when solved with the CBC solver via PuLP (hereafter referred to as *the failed mathematical model*)
 3. A diagnostic report on the proposed mathematical model, identifying **all formulation issues** that prevent optimality.
 4. The regenerated mathematical model, which was recreated by your colleague based on the diagnostic report.
 
@@ -399,10 +399,10 @@ Now take a deep breath and think step by step. You will be awarded a million dol
 
 
 PROMPT_PROGRAM_DIAG="""
-You are an expert in Industrial Engineering and Operations Research. 
+You are an expert in Industrial Engineering and Operations Research, proficient in PuLP with the CBC solver.
 
 You are given:
-1. A Gurobi program failed to execution (hereafter referred to as *the failed program*)
+1. A PuLP program that failed to execute (hereafter referred to as *the failed program*)
 2. The execution error message for the failed program
 
 
@@ -417,7 +417,7 @@ You are given:
 ### Your task
 Your task is to review the execution error message, identify the issues in the failed program that caused the error, and revise the program so that it can run successfully.
 
-For **each issue**: 
+For **each issue**:
 - Explain the issue in a short comment
 - Comment out the wrong code line(s) using `# wrong attempt: ...`
 - Write the corrected code right after the comment
@@ -437,16 +437,16 @@ For **each issue**:
 Only output the **full corrected program**, and **enclose it in a single Markdown-style Python code block** that starts with ```python and ends with ```, like this:
 
 ```python
-import gurobipy as gp
-from gurobipy import GRB
-model = gp.Model("OptimizationProblem")
+import pulp
+model = pulp.LpProblem("OptimizationProblem", pulp.LpMinimize)  # or pulp.LpMaximize
 # your code starts from here
-model.optimize()
+status = model.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=300))
 ```
 
-- Ensure model.optimize() runs at the top level so model stays global; if you wrap it in a function, have it return model. Avoid any if __name__ == "__main__": guard.
+- The variable holding the problem MUST be named `model`, and the result of `model.solve(...)` MUST be assigned to a variable named `status`. These exact names are required by downstream tooling.
+- Ensure `model.solve(...)` runs at the top level so `model` stays global; if you wrap it in a function, have it return `model`. Avoid any if __name__ == "__main__": guard.
 - Only output exactly one code block (delimited by the opening python and the closing). Do not write any natural-language text outside the code block.
-- **DO NOT MODIFY ANY CODE after the line model.optimize()**.
+- **DO NOT MODIFY ANY CODE after the line `model.solve(...)`**.
 
 Now take a deep breath and think step by step. You will be awarded a million dollars if you get this right.
 """

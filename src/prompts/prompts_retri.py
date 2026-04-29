@@ -109,7 +109,7 @@ Now Take a deep breath and think step by step. You will be awarded a million dol
 """
 
 PROMPT_QUICK_MATCH_CODE = """
-You are an expert in Industrial Engineering and Operations Research. Your goal is to identify relevant insights that can give guidance to produce the complete and runnable gurobipy code that strictly adheres to the given mathematical model of the optimization problem.
+You are an expert in Industrial Engineering and Operations Research. Your goal is to identify relevant insights that can give guidance to produce complete and runnable PuLP code (using the CBC solver) that strictly adheres to the given mathematical model of the optimization problem.
 
 You are given:
 1. A problem description.
@@ -176,7 +176,7 @@ You are given:
 
 ### YOUR TASK
 1. Carefully read the problem description and the provided mathematical model.
-2. Before writing the code to solve the mathematical model with Gurobi, evaluate each candidate insight one by one. Keep only those that are **directly applicable to avoiding code-implementation errors**.
+2. Before writing the code to solve the mathematical model with PuLP/CBC, evaluate each candidate insight one by one. Keep only those that are **directly applicable to avoiding code-implementation errors**.
 3. Remove redundancy: when multiple insights overlap, keep only **the most relevant one or several** based on its applicability condition.
 4. Use the **exact insight_id** provided with each candidate; do not invent new IDs.
 

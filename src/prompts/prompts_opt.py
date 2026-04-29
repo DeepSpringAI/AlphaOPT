@@ -47,14 +47,14 @@ Now Take a deep breath and think step by step. You will be awarded a million dol
 
 
 PROMPT_GENERATE_PROGRAM = """
-You are an expert in Industrial Engineering and Operations Research, who are proficient in Gurobi. Your task is to Translate the given mathematical model into a complete and executable Gurobipy program.
+You are an expert in Industrial Engineering and Operations Research, who are proficient in PuLP with the CBC solver. Your task is to translate the given mathematical model into a complete and executable PuLP program that solves with CBC.
 
 You are given:
 1. A problem description for the optimization task.
 2. A proposed mathematical model for solving this task.
-3. A collection of insights, each with: 
+3. A collection of insights, each with:
 	- taxonomy: the classification of code-implementation area (level 1) and specific aspect/issue (level 2) it addresses.
-	- condition: A trigger explicitly grounded in the mathematical model, when the insight should apply to avoid potential mistakes. It first states the general modeling pattern, then uses the specific model as an example. 
+	- condition: A trigger explicitly grounded in the mathematical model, when the insight should apply to avoid potential mistakes. It first states the general modeling pattern, then uses the specific model as an example.
 	- explanation: A concise description that states the best practice, the common mistake, and its cause.
 	- example: the demonstration showing wrong vs. correct version (principle, formula, or code snippet).
 
@@ -71,23 +71,24 @@ You are given:
 
 ### Your Task
 First, review the given insights one by one, analyse whether each applies and how to apply it.
-Second, following the guidance of applicable insights, produce the complete and runnable gurobipy code that **strictly adheres to the given mathematical model**.
+Second, following the guidance of applicable insights, produce the complete and runnable PuLP code that **strictly adheres to the given mathematical model**.
 Finally, **only output and enclose the code in a single Markdown-style Python code block** that starts with ```python and ends with ```, and follow the overall structure like this:
 
 ```python
-import gurobipy as gp
-from gurobipy import GRB
-model = gp.Model("OptimizationProblem")
-# your code from here
-model.optimize()
+import pulp
+model = pulp.LpProblem("OptimizationProblem", pulp.LpMinimize)  # or pulp.LpMaximize
+# variables, constraints, and objective from here
+status = model.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=300))
 ```
 
 **Guidelines**:
 - Annotate your code with inline brief comments only if insights are provided and applicable: indicate the insight ID and how it influenced that specific code segment. If no insights are applicable, skip such annotations and do not invent IDs.
-- Ensure model.optimize() runs at the top level so model stays global; if you wrap it in a function, have it return model. Avoid any if __name__ == "__main__": guard.
+- The variable holding the problem MUST be named `model`, and the result of `model.solve(...)` MUST be assigned to a variable named `status`. These exact names are required by downstream tooling.
+- Ensure `model.solve(...)` runs at the top level so `model` stays global; if you wrap it in a function, have it return `model`. Avoid any if __name__ == "__main__": guard.
+- Use `pulp.LpVariable` / `pulp.LpVariable.dicts` with `cat=pulp.LpInteger` or `cat=pulp.LpBinary` for integer/binary variables; use `cat=pulp.LpContinuous` (the default) for continuous variables. Set `lowBound`/`upBound` explicitly when the model requires them.
 - Only output exactly fenced code block (delimited by the opening python and the closing); no text before or after.
 - Ensure the objective's units are consistent with the problem statement. Apply any stated rounding rule in the description to the objective value.
-- **DO NOT GENERATE OR MODIFY ANY CODE (e.g., `if model.Status == GRB.OPTIMAL:`) after `model.optimize()`**.
+- **DO NOT GENERATE OR MODIFY ANY CODE (e.g., `if pulp.LpStatus[status] == 'Optimal':`) after `model.solve(...)`**.
 
 Now Take a deep breath and think step by step. You will be awarded a million dollars if you get this right.
 """
@@ -172,11 +173,11 @@ Now take a deep breath and think step by step. You will be awarded a million dol
 
 
 PROMPT_SELF_EXPLORE="""
-You are an expert in Industrial Engineering and Operations Research. 
+You are an expert in Industrial Engineering and Operations Research, proficient in PuLP with the CBC solver.
 
 You are given:
 1. The problem description for an optimization task
-2. The Gurobi programs for this task failed to reach optimality, which were previously proposed by your colleague (hereafter referred to as *the failed programs*), and the execution feedbacks for the failed programs
+2. The PuLP programs for this task failed to reach optimality, which were previously proposed by your colleague (hereafter referred to as *the failed programs*), and the execution feedbacks for the failed programs
 3. Optimal objective value for this task
 
 ### Problem Description
@@ -198,16 +199,16 @@ Critically, always prioritize and strictly adhere to the given problem descripti
 Only output the **full corrected program**, and **enclose it in a single Markdown-style Python code block** that starts with ```python and ends with ```, like this:
 
 ```python
-import gurobipy as gp
-from gurobipy import GRB
-model = gp.Model("OptimizationProblem")
+import pulp
+model = pulp.LpProblem("OptimizationProblem", pulp.LpMinimize)  # or pulp.LpMaximize
 # your code starts from here
-model.optimize()
+status = model.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=300))
 ```
 
-- Ensure model.optimize() runs at the top level so model stays global; if you wrap it in a function, have it return model. Avoid any if __name__ == "__main__": guard.
+- The variable holding the problem MUST be named `model`, and the result of `model.solve(...)` MUST be assigned to a variable named `status`. These exact names are required by downstream tooling.
+- Ensure `model.solve(...)` runs at the top level so `model` stays global; if you wrap it in a function, have it return `model`. Avoid any if __name__ == "__main__": guard.
 - Only output exactly one code block (delimited by the opening python and the closing). Do not write any natural-language text outside the code block.
-- **DO NOT GENERATE OR MODIFY ANY CODE (e.g., `if model.Status == GRB.OPTIMAL:`) after `model.optimize()`**.
+- **DO NOT GENERATE OR MODIFY ANY CODE (e.g., `if pulp.LpStatus[status] == 'Optimal':`) after `model.solve(...)`**.
 
 Now take a deep breath and think step by step. You will be awarded a million dollars if you get this right.
 """

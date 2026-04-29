@@ -574,7 +574,7 @@ def execute_code(code_str, timeout_sec=400):
             timeout=timeout_sec # Set the maximum run time
         )
 
-        # Extract Gurobi's objVal (optimal objective value) from stdout
+        # Extract the solver's objective value from stdout (footer prints "Optimal value: ...")
         output = result.stdout
         match = re.search(r"Optimal value\s*[:=]\s*([0-9.+-eE]+)", output)
 
@@ -734,10 +734,10 @@ def self_correction(
 
 
 PROMPT_SELF_DEBUG="""
-You are an expert in Industrial Engineering and Operations Research. 
+You are an expert in Industrial Engineering and Operations Research, proficient in PuLP with the CBC solver.
 
 You are given:
-1. A Gurobi program failed to execution
+1. A PuLP program that failed to execute
 2. The execution error message for the failed program
 
 
@@ -757,29 +757,29 @@ Your task is to review the execution error message, identify the issues in the f
 Only output the **full corrected program**, and **enclose it in a single Markdown-style Python code block** that starts with ```python and ends with ```, like this:
 
 ```python
-import gurobipy as gp
-from gurobipy import GRB
-model = gp.Model("OptimizationProblem")
+import pulp
+model = pulp.LpProblem("OptimizationProblem", pulp.LpMinimize)  # or pulp.LpMaximize
 # your code starts from here
-model.optimize()
+status = model.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=300))
 ```
 
-- Ensure model.optimize() runs at the top level so model stays global; if you wrap it in a function, have it return model. Avoid any if __name__ == "__main__": guard.
+- The variable holding the problem MUST be named `model`, and the result of `model.solve(...)` MUST be assigned to a variable named `status`. These exact names are required by downstream tooling.
+- Ensure `model.solve(...)` runs at the top level so `model` stays global; if you wrap it in a function, have it return `model`. Avoid any if __name__ == "__main__": guard.
 - Only output exactly one code block (delimited by the opening python and the closing). Do not write any natural-language text outside the code block.
-- **DO NOT MODIFY ANY CODE after the line model.optimize()**.
+- **DO NOT MODIFY ANY CODE after the line `model.solve(...)`**.
 
 Now take a deep breath and think step by step. You will be awarded a million dollars if you get this right.
 """
 
 
 PROMPT_SELF_CORRECTION="""
-You are an expert in Industrial Engineering and Operations Research.
+You are an expert in Industrial Engineering and Operations Research, proficient in PuLP with the CBC solver.
 
 You are given:
 1) the problem description of the optimization task,
 2) the mathematical formulation your colleague proposed,
-3) the Gurobi program based on the formulation,
-4) the output (and possibly the error message) of executing the Gurobi program.
+3) the PuLP program based on the formulation,
+4) the output (and possibly the error message) of executing the PuLP program.
 
 ### Problem description
 {problem_description}
@@ -787,14 +787,14 @@ You are given:
 ### Mathematical formulation
 {candidate_formulation}
 
-### The Gurobi program
+### The PuLP program
 {candidate_program}
 
 ### Execution Output
 {feedback}
 
 ### Your task
-Carefully review the problem description, the proposed mathematical formulation, the Gurobi program, and the execution output. Determine whether BOTH the formulation AND the program are correct and faithful to the problem description.
+Carefully review the problem description, the proposed mathematical formulation, the PuLP program, and the execution output. Determine whether BOTH the formulation AND the program are correct and faithful to the problem description.
 
 If BOTH are correct: explain briefly why (the “reason”) and mark the status as "correct".
 If EITHER is incorrect: provide an “analysis” that pinpoints the issues (modeling mismatch, wrong objective sign, missing/incorrect constraints, indexing/domain errors, integrality, parameter usage, solver API misuse, etc.), give a concise “reason”, and then provide a fully corrected version of the formulation and/or program.
@@ -812,11 +812,12 @@ Return a SINGLE JSON object with the following fields and NOTHING else (no Markd
 }
 
 #### Program requirements (when providing "corrected_program"):
-- Provide a COMPLETE runnable Python script compatible with Gurobi (e.g., imports, model creation, variables, constraints, objective, model.optimize()).
-- Include `model.optimize()` at top level (not gated by `if __name__ == '__main__':`).
+- Provide a COMPLETE runnable Python script using PuLP with the CBC solver (e.g., `import pulp`, `model = pulp.LpProblem(...)`, variables/constraints/objective, `status = model.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=300))`).
+- The problem variable MUST be named `model` and the solve result MUST be assigned to `status`.
+- Include `model.solve(...)` at top level (not gated by `if __name__ == '__main__':`).
 - Do NOT include any text outside the Python code in the string.
 - Do NOT include Markdown code fences inside the string.
-- Do NOT place any code AFTER the line containing `model.optimize()`.
+- Do NOT place any code AFTER the line containing `model.solve(...)`.
 
 #### Additional guidance
 - Judge correctness against the problem description first; use execution output for clues (e.g., infeasibility, domain/index errors, attribute errors).
