@@ -43,16 +43,34 @@ Self-Improve-LLM-OPT/
 ├── library_refinement.py       # Library refinement
 ├── train_config.yaml          # Training parameter config
 ├── eval_config.yaml           # Evaluation parameter config
-└── requirements.txt           # Dependencies list
+├── pyproject.toml             # Dependencies (managed with uv)
+├── uv.lock                    # Locked dependency versions
+└── Makefile                   # Common dev workflows
 ```
 
 ### 2. Environment Setup 
 **1. Install Dependencies**
 
-This project is designed to run with Python 3.13.5. Install the dependencies with:
+This project is designed to run with Python 3.11-3.13. Install [uv](https://docs.astral.sh/uv/) and sync the environment with:
 
 ```bash
-pip install -r requirements.txt
+make sync
+# or: uv sync
+```
+
+Optional extras:
+
+```bash
+make sync-extras
+# or: uv sync --all-extras
+```
+
+Run the main entry points with:
+
+```bash
+make train
+make eval
+make smoke
 ```
 
 **2. API Key Configuration**
