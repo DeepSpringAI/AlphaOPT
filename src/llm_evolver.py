@@ -18,8 +18,9 @@ from .llm_retriever import LibraryRetrieval
 from .prompts.prompts_evolve import PROMPT_INS_NEG, PROMPT_INS_UNR, PROMPT_INS_REFINEMENT
 
 #* Configure
-from omegaconf import OmegaConf
-config = OmegaConf.load("train_config.yaml")
+from .config import load_train_config
+
+config = load_train_config()
 
 class LibraryEvolution:
     """

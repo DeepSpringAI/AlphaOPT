@@ -8,8 +8,9 @@ import threading
 from dotenv import load_dotenv
 
 #* Configure
-from omegaconf import OmegaConf
-config = OmegaConf.load("train_config.yaml")
+from .config import load_train_config
+
+config = load_train_config()
 
 
 # ==== Global token usage tracker ====

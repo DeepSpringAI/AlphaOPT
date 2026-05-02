@@ -1,24 +1,35 @@
 import os
 import time
 import json
-
-from src.dataloader import DataLoader
-from src.utils import cal_time_cost
-from src.train_eval_utils import save_checkpoint, print_training_metrics_summary
-from library_online_learning import run_library_online_learning
-from library_diagnosis import run_library_diagnosis
-from library_refinement import run_library_refinement
-from src.experience_library import ExperienceLibrary
-from src.llm_programmer import ProgramGenerator
-from src.llm_diagnostic import ProgramDiagnostic
-from src.llm_extractor import InsightExtractor
-from src.llm_retriever import LibraryRetrieval
-from src.llm_evolver import LibraryEvolution
+import argparse
+from src.config import get_train_config_path
 
 def main():
     #* Configure
     from omegaconf import OmegaConf
-    config = OmegaConf.load("train_config.yaml")
+    parser = argparse.ArgumentParser(description="Run AlphaOPT training")
+    parser.add_argument(
+        "--config",
+        default=get_train_config_path(),
+        help="Path to training config YAML file",
+    )
+    args = parser.parse_args()
+
+    os.environ["ALPHAOPT_TRAIN_CONFIG"] = args.config
+    config = OmegaConf.load(args.config)
+
+    from src.dataloader import DataLoader
+    from src.utils import cal_time_cost
+    from src.train_eval_utils import save_checkpoint, print_training_metrics_summary
+    from library_online_learning import run_library_online_learning
+    from library_diagnosis import run_library_diagnosis
+    from library_refinement import run_library_refinement
+    from src.experience_library import ExperienceLibrary
+    from src.llm_programmer import ProgramGenerator
+    from src.llm_diagnostic import ProgramDiagnostic
+    from src.llm_extractor import InsightExtractor
+    from src.llm_retriever import LibraryRetrieval
+    from src.llm_evolver import LibraryEvolution
 
     #* Generate a timestamp and append it to output_folder
     # Re-resolve

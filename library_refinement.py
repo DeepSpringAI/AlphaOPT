@@ -341,7 +341,9 @@ if __name__ == "__main__":
 
     #* Configure
     from omegaconf import OmegaConf
-    config = OmegaConf.load("train_config.yaml")
+    from src.config import load_train_config
+
+    config = load_train_config()
 
     start_time = time.time()
 
