@@ -1,16 +1,15 @@
-base_model: google/gemini-2.5-flash  
-advanced_model: google/gemini-2.5-flash
-base_service: openrouter # null for direct API calls
-advanced_service: openrouter
+base_model: gpt-5.4
+advanced_model: gpt-5.4
+base_service: http://127.0.0.1:4010/v1
+advanced_service: http://127.0.0.1:4010/v1
 verbose: false
 start_iter: 0
-data_slice: 
+data_slice:
 
-# API Keys
 api_keys:
-  OPEN_ROUTER_KEY: 
-  GEMINI_API_KEY: 
-  OPENAI_API_KEY:    # Set your OpenAI API key here 
+  OPEN_ROUTER_KEY:
+  GEMINI_API_KEY:
+  OPENAI_API_KEY:
 
 params:
   num_iterations: 1
@@ -18,10 +17,10 @@ params:
   tolerance: 1e-6
   max_solution_attempts: 1
   max_verify_attempts: 3
-  variant_num: 5  # the number of refined condition 
-  
+  variant_num: 5
+
 dataset: train_data_all_452
-output_folder: train_data_all_452_flash
+output_folder: e2_gpt54_gurobi_train_data_all_452
 file_paths:
   train_data_path: ./data/optimization_tasks/train/${dataset}.json
   train_output_dir: ./learning/${output_folder}/
@@ -29,13 +28,12 @@ file_paths:
   metrics_log_path: ./learning/${output_folder}/iteration_metrics.json
 
 ablation:
-  taxonomy: true                 # Whether to enable taxonomy-based retrieval
-  rewrite: false                 # Whether to enable insight rewriting
-  include_example: true          # Whether to include insight examples
-  include_program_insight: true  # Whether to include code implementation insight
-  max_debug_retry: 3             # Whether to enable self-debug and number of times
+  taxonomy: true
+  rewrite: false
+  include_example: true
+  include_program_insight: true
+  max_debug_retry: 3
 
-# Token pricing (USD per 1M tokens)
 pricing:
   gemini:
     gemini-2.5-pro:

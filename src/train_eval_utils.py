@@ -16,8 +16,9 @@ from .utils import call_llm_and_parse_with_retry
 import copy
 
 #* Configure
-from omegaconf import OmegaConf
-config = OmegaConf.load("train_config.yaml")
+from .config import load_train_config
+
+config = load_train_config()
 
 def divide_insight(insight):
     # Divide insights into formulation and program stage

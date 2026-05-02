@@ -861,7 +861,9 @@ if __name__ == "__main__":
 
     #* Configure
     from omegaconf import OmegaConf
-    config = OmegaConf.load("train_config.yaml")
+    from src.config import load_train_config
+
+    config = load_train_config()
 
     # Generate a timestamp and append it to output_folder
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")

@@ -22,8 +22,9 @@ from .prompts.prompts_diag import (
 
 
 #* Configure
-from omegaconf import OmegaConf
-config = OmegaConf.load("train_config.yaml")
+from .config import load_train_config
+
+config = load_train_config()
 
 class ProgramDiagnostic:
     """

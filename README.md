@@ -73,6 +73,25 @@ make eval
 make smoke
 ```
 
+### 3. Predefined Experiment Commands
+
+Two paper-aligned experiment entry points are available:
+
+```bash
+make exp-e1
+make exp-e2
+```
+
+- `make exp-e1`: evaluates GPT-5.4 on all evaluation datasets using the preserved original GPT-4o + Gurobi library.
+- `make exp-e2`: retrains the library on the original train split with GPT-5.4 + Gurobi, then evaluates GPT-5.4 on all evaluation datasets.
+
+Library locations used by these commands:
+
+- Original preserved library: `data/experience_library/original_gpt4o_gurobi_library.json`
+- Original preserved taxonomy: `data/experience_library/original_gpt4o_gurobi_taxonomy.json`
+- Retrained E2 library output: `data/experience_library/iterations/e2_gpt54_gurobi_train_data_all_452/library_refine_iter1.json`
+- Retrained E2 taxonomy output: `data/experience_library/iterations/e2_gpt54_gurobi_train_data_all_452/latest_taxonomy_refine_iter1.json`
+
 **2. API Key Configuration**
 
 Configure LLM API keys in `train_config.yaml` and `eval_config.yaml`:
