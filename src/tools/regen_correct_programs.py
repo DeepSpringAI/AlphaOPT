@@ -101,7 +101,7 @@ def main():
     if args.limit is not None:
         tasks = tasks.slice(0, args.limit)
 
-    print(f"[regen] {len(tasks)} task(s) to process. Writing to {args.output}.")
+    print(f"[regen] {len(tasks)} task(s) to process. Writing to {args.output}.", flush=True)
 
     work_dir = Path(args.output).parent / "_regen_workdir"
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -117,10 +117,10 @@ def main():
             task_id, program, err = fut.result()
             if program is not None:
                 results[task_id] = program
-                print(f"[regen] task {task_id}: ok")
+                print(f"[regen] task {task_id}: ok", flush=True)
             else:
                 failures[task_id] = err
-                print(f"[regen] task {task_id}: FAILED — {err}")
+                print(f"[regen] task {task_id}: FAILED — {err}", flush=True)
 
     # Write the regenerated dataset, preserving original ordering and fields.
     with open(args.input, "r", encoding="utf-8") as f:
@@ -137,13 +137,14 @@ def main():
 
     print(
         f"[regen] done. {len(results)}/{len(tasks)} tasks regenerated. "
-        f"{len(failures)} failures left unchanged in the output."
+        f"{len(failures)} failures left unchanged in the output.",
+        flush=True,
     )
     if failures:
         failure_log = Path(args.output).with_suffix(".failures.json")
         with open(failure_log, "w", encoding="utf-8") as f:
             json.dump(failures, f, ensure_ascii=False, indent=2)
-        print(f"[regen] wrote failure details to {failure_log}.")
+        print(f"[regen] wrote failure details to {failure_log}.", flush=True)
 
 
 if __name__ == "__main__":

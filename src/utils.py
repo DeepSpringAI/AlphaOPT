@@ -112,6 +112,40 @@ def _is_gpt5_family_model_id(model_id: str) -> bool:
     return tail.startswith("gpt-5")
 
 
+def _upstream_llm_error_hint(exc: BaseException) -> str:
+    """Short actionable hints for common LiteLLM / gateway failures (not AlphaOPT bugs)."""
+    msg = f"{type(exc).__name__}: {exc!s}"
+    low = msg.lower()
+    if "expired key" in low:
+        return (
+            "\ndebug: LiteLLM/upstream API key expired or rejected. Update "
+            "`~/.config/LLMProxy-credentials.toml` → `[litellm_gateway]` `api_key` (and restart llm-api-proxy), "
+            "or set `OPENAI_API_KEY` / `AlphaOPT-credentials.toml` if you call the gateway without proxy auth."
+        )
+    if "authentication error" in low and "key" in low:
+        return (
+            "\ndebug: Upstream authentication failed. Refresh the API key used by llm-api-proxy (see LLMProxy-credentials.toml)."
+        )
+    if (
+        "502" in msg
+        or "bad gateway" in low
+        or "badgateway" in low
+        or "<title>502 bad gateway</title>" in low
+        or "nginx" in low and "gateway" in low
+    ):
+        return (
+            "\ndebug: Upstream returned HTTP 502 (nginx/LiteLLM/MLX). Usually transient: overloaded gateway, "
+            "pod restart, or broken route behind `litellm-eastus.mlx.*`. Retry later; reduce `--max-workers` on regen; "
+            "check MLX QA cluster / LiteLLM service health — not fixable inside AlphaOPT alone."
+        )
+    if "prompt injection" in low or "rejected message" in low:
+        return (
+            "\ndebug: MLX/upstream safety rejected the prompt as injection-like. Try fewer parallel workers, "
+            "or inspect task text / formulation prompts — occasional false positives on OR descriptions."
+        )
+    return ""
+
+
 def _apply_gpt5_openai_chat_params(model: str, vendor: str, create_params: dict) -> dict:
     """
     Azure / LiteLLM reject non-1 temperature for GPT-5 family; omit frequency_penalty.
@@ -148,12 +182,14 @@ def reset_token_usage() -> None:
             for k in stats.keys():
                 stats[k] = 0.0
 
-def _build_client(model: str, service: str):
+def _build_client(model: str, service: str, *, timeout_sec: float | None = None):
     """
-    Return (vendor, client) according to the model name
+    Return (vendor, client) according to the model name.
+    ``timeout_sec`` is passed to the OpenAI SDK for chat-capable clients (optional).
     """
     load_dotenv()
     toml_keys = load_credentials_toml()
+    _oai_timeout = {"timeout": timeout_sec} if timeout_sec is not None else {}
 
     def _api_key(name: str, yaml_val) -> str | None:
         env_v = os.getenv(name)
@@ -181,7 +217,7 @@ def _build_client(model: str, service: str):
                     "OPEN_ROUTER_KEY is not set. Use env OPEN_ROUTER_KEY, train_config.yaml "
                     "api_keys.OPEN_ROUTER_KEY, or [api_keys] in ~/.config/AlphaOPT-credentials.toml"
                 )
-            client = OpenAI(api_key=openrouter_key, base_url=base_url)
+            client = OpenAI(api_key=openrouter_key, base_url=base_url, **_oai_timeout)
             return "openrouter", client
 
         # Allow a custom OpenAI-compatible endpoint such as a local vLLM / LM Studio / proxy server.
@@ -189,7 +225,7 @@ def _build_client(model: str, service: str):
             # Some local OpenAI-compatible servers do not enforce auth; the OpenAI SDK still
             # requires an API key argument, so fall back to a harmless placeholder.
             api_key = openai_key or "EMPTY"
-            client = OpenAI(api_key=api_key, base_url=service)
+            client = OpenAI(api_key=api_key, base_url=service, **_oai_timeout)
             return "openai", client
 
         raise RuntimeError(
@@ -214,7 +250,7 @@ def _build_client(model: str, service: str):
         # client = OpenAI(api_key=api_key)
         if not openai_key:
             raise RuntimeError("OPENAI_API_KEY is not set in config or environment")
-        client = OpenAI(api_key=openai_key)
+        client = OpenAI(api_key=openai_key, **_oai_timeout)
         return "openai", client
     
     # Default case - should not reach here
@@ -355,13 +391,16 @@ def call_llm_and_parse_with_retry(
             return result
 
         except Exception as err:
+            hint = _upstream_llm_error_hint(err)
             # final attempt → raise
             if attempt == max_retry:
-                raise RuntimeError(error_message or
-                                f"\nFailed to parse results from LLM after {max_retry} attempts") from err
+                base = error_message or f"\nFailed to parse results from LLM after {max_retry} attempts"
+                raise RuntimeError(base + hint) from err
             # exponential back-off
             backoff = sleep_sec * (2 ** (attempt - 1))
-            print(f"\nFailed to parse results on attempt {attempt}. \nError: {err}. \nRetrying in {backoff:.1f}s …")
+            print(
+                f"\nFailed to parse results on attempt {attempt}. \nError: {err}.{hint} \nRetrying in {backoff:.1f}s …"
+            )
             time.sleep(backoff)
 
 def save_log_data(data, data_path):
