@@ -2,6 +2,26 @@
 
 Append-only log for meaningful changes.
 
+## [2026-04-30 13:00]
+
+- Action: Added **`make preflight-llm`** / **`make check-llm`** (`src/tools/llm_preflight.py`): GET proxy **`/health`**, timed **`chat.completions`** “pong” probe using **`train_config.yaml`**, shared **`src.utils.config`** for keys; optional flags (`--timeout`, `--warn-latency`, `--skip-health`). Extended **`_build_client(..., timeout_sec=)`** for OpenAI clients.
+- Result: success (local run: health ~13 ms, chat ~4.7 s)
+
+## [2026-04-30 12:00]
+
+- Action: Documented regen failures from **502 Bad Gateway (nginx → LiteLLM/MLX)** and occasional **prompt-injection** rejections as **upstream/infra** (not local AlphaOPT). Renamed/expanded `src/utils.py` hint helper to `_upstream_llm_error_hint` (502 + injection + existing key hints).
+- Result: success
+
+## [2026-04-30 11:20]
+
+- Action: Set `train_config.yaml` to **`gpt-5.4`** (per QA row in `llm-api-proxy/docs/MODEL_PROXY_MATRIX_REPORT.md`). Fixed **`make regen` log capture**: `PYTHONUNBUFFERED=1` in Makefile + `flush=True` on regen prints (stdout was block-buffered when piped to `tee`). Full run logs to **`docs/regen-gpt-5.4-qa.log`** (includes aborted first attempt + restart).
+- Result: success (regen running / monitor with `tail -f docs/regen-gpt-5.4-qa.log`)
+
+## [2026-04-30]
+
+- Action: Diagnosed `make regen` failures as LiteLLM HTTP 500 — upstream API key **expired** (not regen script bugs). Added `_upstream_auth_error_hint()` in `src/utils.py` and clarified Makefile `regen` help.
+- Result: success
+
 ## [2026-04-29 16:00]
 
 - Action: Debugged `make train` — LLM client builds for `gpt-5` + `http://127.0.0.1:8801/v1`; proxy `/health` OK. Runtime task failures are **Gurobi** `License expired 2025-11-14` when executing generated programs, not OpenAI/proxy import errors.

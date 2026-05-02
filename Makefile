@@ -1,4 +1,4 @@
-.PHONY: help sync sync-extras train eval check-proxy train-with-proxy smoke regen-smoke regen
+.PHONY: help sync sync-extras train eval check-proxy check-llm preflight-llm train-with-proxy smoke regen-smoke regen
 
 UV ?= uv
 REPO_ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -28,18 +28,21 @@ eval: ## Run evaluation (reads eval_config.yaml in cwd)
 	cd "$(REPO_ROOT)" && $(UV) run python evaluation.py
 
 regen-smoke: ## Regenerate correct_program for the first 5 training tasks (PuLP+CBC) — sanity check
-	cd "$(REPO_ROOT)" && $(UV) run python -m src.tools.regen_correct_programs \
+	cd "$(REPO_ROOT)" && PYTHONUNBUFFERED=1 $(UV) run python -m src.tools.regen_correct_programs \
 		--input  "$(REGEN_INPUT)" \
 		--output "$(REGEN_OUTPUT)" \
 		--limit  5
 
-regen: ## Regenerate correct_program for ALL training tasks (PuLP+CBC) — spends LLM tokens
-	cd "$(REPO_ROOT)" && $(UV) run python -m src.tools.regen_correct_programs \
+regen: ## Regenerate correct_program for ALL training tasks (PuLP+CBC) — spends LLM tokens (needs valid llm-api-proxy / LiteLLM key)
+	cd "$(REPO_ROOT)" && PYTHONUNBUFFERED=1 $(UV) run python -m src.tools.regen_correct_programs \
 		--input  "$(REGEN_INPUT)" \
 		--output "$(REGEN_OUTPUT)"
 
 check-proxy: ## Verify OpenAI-compatible proxy at localhost:8801 (optional local setup)
 	@curl -sf http://localhost:8801/health >/dev/null && echo "proxy health OK" || (echo "debug: no proxy at http://localhost:8801/health — use direct API keys or set base_service to your proxy URL in train_config.yaml" >&2; exit 1)
+
+preflight-llm check-llm: ## Timed GET /health + one chat completion via train_config.yaml (run before train/regen)
+	cd "$(REPO_ROOT)" && $(UV) run python -m src.tools.llm_preflight
 
 train-with-proxy: check-proxy ## Run training only after proxy health check passes
 	cd "$(REPO_ROOT)" && $(UV) run python main.py
