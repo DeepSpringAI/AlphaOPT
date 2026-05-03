@@ -4,8 +4,8 @@ data_path_template: ./data/optimization_tasks/split/test_data/${dataset}.json
 library_path: ./data/experience_library/library.json
 taxonomy_path: ./data/experience_library/latest_taxonomy.json
 output_folder_template: ${dataset}_eval
-model: gpt-5 
-service: http://127.0.0.1:4010/v1 # null
+model: gpt-5.4
+service: azure
 n_runs: 3
 temperature: 0.0
 pass_at_k: 1

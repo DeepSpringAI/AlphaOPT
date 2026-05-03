@@ -1,7 +1,7 @@
 base_model: gpt-5.4
 advanced_model: gpt-5.4
-base_service: http://127.0.0.1:4010/v1
-advanced_service: http://127.0.0.1:4010/v1
+base_service: azure
+advanced_service: azure
 verbose: false
 start_iter: 0
 data_slice:

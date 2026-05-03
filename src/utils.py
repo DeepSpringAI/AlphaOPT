@@ -2,6 +2,8 @@ import os
 import re
 import time
 import json
+import tomllib
+from pathlib import Path
 from typing import Any, Callable, Dict
 from copy import deepcopy
 import threading
@@ -23,6 +25,13 @@ TOKEN_USAGE: Dict[str, Dict[str, float]] = {
         "cost": 0.0,
     },
     "openrouter": {
+        "requests": 0,
+        "prompt_tokens": 0.0,
+        "completion_tokens": 0.0,
+        "total_tokens": 0.0,
+        "cost": 0.0,
+    },
+    "azure": {
         "requests": 0,
         "prompt_tokens": 0.0,
         "completion_tokens": 0.0,
@@ -123,9 +132,56 @@ def reset_token_usage() -> None:
             for k in stats.keys():
                 stats[k] = 0.0
 
+
+LLM_PROXY_CREDENTIALS_TOML = Path.home() / ".config" / "LLMProxy-credentials.toml"
+
+
+def _load_llmproxy_azure_config() -> dict[str, str] | None:
+    """
+    Read [azure] from ~/.config/LLMProxy-credentials.toml (same layout as llm-api-proxy).
+    Environment variables override file values: AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY,
+    AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION.
+    """
+    endpoint = (os.getenv("AZURE_OPENAI_ENDPOINT") or "").strip()
+    api_key = (os.getenv("AZURE_OPENAI_API_KEY") or "").strip()
+    deployment = (os.getenv("AZURE_OPENAI_DEPLOYMENT") or "").strip()
+    api_version = (os.getenv("AZURE_OPENAI_API_VERSION") or "").strip()
+
+    path = LLM_PROXY_CREDENTIALS_TOML.expanduser()
+    if path.is_file():
+        try:
+            with open(path, "rb") as f:
+                data = tomllib.load(f)
+        except Exception:
+            data = {}
+        else:
+            az = data.get("azure")
+            if isinstance(az, dict):
+                if not endpoint:
+                    endpoint = (az.get("endpoint") or "").strip()
+                if not api_key:
+                    api_key = (az.get("api_key") or "").strip()
+                if not deployment:
+                    deployment = (az.get("deployment_name") or "").strip()
+                if not api_version:
+                    api_version = (az.get("api_version") or "").strip()
+
+    if not (endpoint and api_key and deployment and api_version):
+        return None
+    return {
+        "azure_endpoint": endpoint.rstrip("/"),
+        "api_key": api_key,
+        "deployment_name": deployment,
+        "api_version": api_version,
+    }
+
+
 def _build_client(model: str, service: str):
     """
-    Return (vendor, client) according to the model name
+    Return (vendor, client, api_model_name) according to the model name and service.
+
+    api_model_name is the string passed to the provider SDK (Azure uses deployment name
+    from credentials; others use the logical model id from config).
     """
     load_dotenv()
     
@@ -144,7 +200,25 @@ def _build_client(model: str, service: str):
             if not openrouter_key:
                 raise RuntimeError("OPEN_ROUTER_KEY is not set in config or environment")
             client = OpenAI(api_key=openrouter_key, base_url=base_url)
-            return "openrouter", client
+            return "openrouter", client, model
+
+        if service_lower in ("azure", "azure_openai"):
+            from openai import AzureOpenAI
+
+            acfg = _load_llmproxy_azure_config()
+            if not acfg:
+                raise RuntimeError(
+                    "Azure OpenAI: set [azure] in ~/.config/LLMProxy-credentials.toml "
+                    "(endpoint, api_key, deployment_name, api_version) or export "
+                    "AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_DEPLOYMENT, "
+                    "AZURE_OPENAI_API_VERSION."
+                )
+            client = AzureOpenAI(
+                api_version=acfg["api_version"],
+                api_key=acfg["api_key"],
+                azure_endpoint=acfg["azure_endpoint"],
+            )
+            return "azure", client, acfg["deployment_name"]
 
         # Allow a custom OpenAI-compatible endpoint such as a local vLLM / LM Studio / proxy server.
         if service_lower.startswith("http://") or service_lower.startswith("https://"):
@@ -152,10 +226,11 @@ def _build_client(model: str, service: str):
             # requires an API key argument, so fall back to a harmless placeholder.
             api_key = openai_key or os.getenv("OPENAI_API_KEY") or "EMPTY"
             client = OpenAI(api_key=api_key, base_url=service)
-            return "openai", client
+            return "openai", client, model
 
         raise RuntimeError(
-            f"Unsupported service value: {service}. Use 'openrouter', 'null', or a full http(s) OpenAI-compatible base URL."
+            f"Unsupported service value: {service}. Use 'openrouter', 'azure', 'null', "
+            "or a full http(s) OpenAI-compatible base URL."
         )
 
     # Gemini family
@@ -165,7 +240,7 @@ def _build_client(model: str, service: str):
             raise RuntimeError("GEMINI_API_KEY is not set in config or environment")
         from google import genai
         client = genai.Client(api_key=gemini_key)
-        return "gemini", client
+        return "gemini", client, model
 
     if "gpt" in model.lower():
         # OpenAI-compatible (includes vLLM)
@@ -177,7 +252,7 @@ def _build_client(model: str, service: str):
         if not openai_key:
             raise RuntimeError("OPENAI_API_KEY is not set in config or environment")
         client = OpenAI(api_key=openai_key)
-        return "openai", client
+        return "openai", client, model
     
     # Default case - should not reach here
     raise RuntimeError(f"Unsupported model: {model}")
@@ -199,22 +274,22 @@ def call_llm_and_parse_with_retry(
     Send a chat prompt to OpenAI or Gemini automatically detected by `model`,
     retry on failure, and parse the raw text with `parse_fn`.
     """
-    vendor, client = _build_client(model, service)
+    vendor, client, api_model = _build_client(model, service)
 
     def _send_request() -> str:
         """
         Dispatch the request to the proper SDK and return raw text.
         """
-        # OpenAI / OpenRouter call (OpenAI-compatible)
-        if vendor in ("openai", "openrouter"):
+        # OpenAI / OpenRouter / Azure OpenAI (chat.completions)
+        if vendor in ("openai", "openrouter", "azure"):
             msgs = prompt if isinstance(prompt, list) else [{"role": "user", "content": prompt}]
             # Build parameters dict
             create_params = {
-                "model": model,
+                "model": api_model,
                 "messages": msgs,
                 "temperature": temperature
             }
-            # Add frequency_penalty for OpenAI vendor only
+            # Add frequency_penalty for public OpenAI only (Azure / new models may reject it).
             if vendor == "openai":
                 create_params["frequency_penalty"] = 0.5
             completion = client.chat.completions.create(**create_params)
@@ -225,8 +300,9 @@ def call_llm_and_parse_with_retry(
             completion_tokens = getattr(usage, "completion_tokens", None) if usage is not None else None
             total_tokens = getattr(usage, "total_tokens", None) if usage is not None else None
 
-            # Estimate cost from token usage
-            cost = _estimate_cost(vendor, model, prompt_tokens, completion_tokens)
+            # Pricing keys use logical model name from YAML; Azure bills like OpenAI.
+            pricing_vendor = "openai" if vendor == "azure" else vendor
+            cost = _estimate_cost(pricing_vendor, model, prompt_tokens, completion_tokens)
             # If OpenRouter additionally provides usage.cost, you can choose to override or log separately
             if vendor == "openrouter" and usage is not None:
                 explicit_cost = getattr(usage, "cost", None)

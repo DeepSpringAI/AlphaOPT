@@ -6,7 +6,7 @@ taxonomy_path: ./data/experience_library/original_gpt4o_gurobi_taxonomy.json
 
 output_folder_template: ${dataset}_eval_gpt54_e1_original
 model: gpt-5.4
-service: http://127.0.0.1:4010/v1
+service: azure
 
 n_runs: 3
 temperature: 0.0
