@@ -3,6 +3,7 @@ import json
 import time
 import yaml
 import statistics
+from pathlib import Path
 from typing import List, Tuple, Optional, Any
 
 from tqdm.auto import tqdm
@@ -277,12 +278,28 @@ def evaluate_single_dataset(config: Any, dataset: str) -> dict:
 
     if use_library:
         # Load trained experience library, optionally with the paired taxonomy file.
+        library_path = str(dataset_config.library_path)
+        taxonomy_path = str(getattr(dataset_config, "taxonomy_path", "") or "")
+
+        if not os.path.isfile(library_path):
+            raise FileNotFoundError(
+                f"Configured library_path does not exist: {library_path}"
+            )
+        if taxonomy_path and not os.path.isfile(taxonomy_path):
+            raise FileNotFoundError(
+                f"Configured taxonomy_path does not exist: {taxonomy_path}"
+            )
+
         print("Loading Library...")
-        taxonomy_path = getattr(dataset_config, "taxonomy_path", None)
+        print(f"Library path: {library_path}")
+        if taxonomy_path:
+            print(f"Taxonomy path: {taxonomy_path}")
+
         library = ExperienceLibrary.from_json_file(
-            dataset_config.library_path,
-            taxonomy_path=taxonomy_path,
+            library_path,
+            taxonomy_path=taxonomy_path or None,
         )
+        print(f"Loaded {len(library)} insights from the configured library.")
     else:
         print("Do task without Library...")
         library = None
@@ -517,7 +534,9 @@ def main() -> None:
     args = parser.parse_args()
 
     # Read the configuration file
+    os.environ["ALPHAOPT_EVAL_CONFIG"] = args.config
     config = load_config(args.config)
+    print(f"Evaluation config: {Path(args.config).resolve()}")
 
     # Get datasets list - support both single string and list
     # Check for 'datasets' first, then fall back to 'dataset' for backward compatibility

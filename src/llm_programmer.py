@@ -134,7 +134,15 @@ class ProgramGenerator:
                 sleep_sec=0.5,
                 verbose=verbose,
                 log_header=custom_header,
-                error_message=error_message 
+                error_message=error_message,
+                trace_output_path=output_path,
+                trace_context={
+                    "module": "llm_programmer",
+                    "operation": "rewrite_insights",
+                    "task_id": task.id,
+                    "iteration": iter,
+                    "stage": "Formulation",
+                },
             )
 
         except Exception as err:
@@ -204,7 +212,15 @@ class ProgramGenerator:
                 sleep_sec=0.5,
                 verbose=verbose,
                 log_header=custom_header,
-                error_message=error_message 
+                error_message=error_message,
+                trace_output_path=output_path,
+                trace_context={
+                    "module": "llm_programmer",
+                    "operation": "generate_formulation",
+                    "task_id": task.id,
+                    "iteration": iter,
+                    "stage": "Formulation",
+                },
             )
 
         except Exception as err:
@@ -260,7 +276,15 @@ class ProgramGenerator:
                 sleep_sec=0.5,
                 verbose=verbose,
                 log_header=custom_header,
-                error_message=error_message 
+                error_message=error_message,
+                trace_output_path=output_path,
+                trace_context={
+                    "module": "llm_programmer",
+                    "operation": "generate_program",
+                    "task_id": task.id,
+                    "iteration": iter,
+                    "stage": "Program",
+                },
             )
 
         except Exception as err:
@@ -345,7 +369,15 @@ class ProgramGenerator:
                     sleep_sec   = 2,
                     verbose     = verbose, #verbose,
                     log_header  = log_header,
-                    error_message = error_message
+                    error_message = error_message,
+                    trace_output_path=output_path,
+                    trace_context={
+                        "module": "llm_programmer",
+                        "operation": "self_explore",
+                        "task_id": task.id,
+                        "attempt": attempt,
+                        "stage": "Program",
+                    },
                 )
 
                 # print(corrected_program)

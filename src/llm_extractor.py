@@ -115,6 +115,14 @@ class InsightExtractor:
                 verbose=verbose,
                 log_header=custom_header,
                 error_message=error_message,
+                trace_output_path=output_path,
+                trace_context={
+                    "module": "llm_extractor",
+                    "operation": "generate_insights",
+                    "task_id": task.id,
+                    "iteration": iter,
+                    "stage": stage,
+                },
             )
 
         except Exception as err:
@@ -292,6 +300,12 @@ class InsightExtractor:
                 verbose=verbose,
                 log_header=custom_header,
                 error_message=error_message,
+                trace_context={
+                    "module": "llm_extractor",
+                    "operation": "conduct_insight_merge",
+                    "target": target,
+                    "stage": "Diagnosis",
+                },
             )
 
         except Exception as err:
@@ -366,6 +380,11 @@ class InsightExtractor:
                 max_retry=3,
                 sleep_sec=0.5,
                 verbose=verbose,
+                trace_context={
+                    "module": "llm_extractor",
+                    "operation": "conduct_insight_online_merge",
+                    "stage": "Diagnosis",
+                },
             )
 
             # print("merge_results", merge_results)
@@ -542,6 +561,14 @@ class InsightExtractor:
                     verbose=verbose,
                     log_header=f"\n==========\n[Iteration {iter}] Modify taxonomy for retrieval - Task {task.id}\n==========\n",
                     error_message=f"\n   Task {task.id} failed to modify taxonomy for retrieval\n",
+                    trace_output_path=output_path,
+                    trace_context={
+                        "module": "llm_extractor",
+                        "operation": "modify_new_insight_for_retrieve_taxonomy",
+                        "task_id": task.id,
+                        "iteration": iter,
+                        "stage": "Diagnosis",
+                    },
                 )
                 print("⭐️ modify_new_insight_for_retrieve - taxonomy", resp)
                 new_taxo = resp.get("taxonomy")
@@ -622,6 +649,14 @@ class InsightExtractor:
                     verbose=verbose,
                     log_header=f"\n==========\n[Iteration {iter}] Modify condition for retrieval - Task {task.id}\n==========\n",
                     error_message=f"\n   Task {task.id} failed to modify condition for retrieval\n",
+                    trace_output_path=output_path,
+                    trace_context={
+                        "module": "llm_extractor",
+                        "operation": "modify_new_insight_for_retrieve_condition",
+                        "task_id": task.id,
+                        "iteration": iter,
+                        "stage": "Diagnosis",
+                    },
                 )
                 print("⭐️ modify_new_insight_for_retrieve - condition", resp)
                 new_condition = resp.get("condition")

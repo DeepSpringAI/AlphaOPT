@@ -133,7 +133,15 @@ class ProgramDiagnostic:
                 sleep_sec   = 2,
                 verbose     = verbose,
                 log_header  = log_header,
-                error_message = error_message
+                error_message = error_message,
+                trace_output_path=output_path,
+                trace_context={
+                    "module": "llm_diagnostic",
+                    "operation": "_diagnose_issues",
+                    "task_id": task.id,
+                    "iteration": iter,
+                    "stage": "Diagnosis",
+                },
             )
 
         except Exception as err:
@@ -191,6 +199,14 @@ class ProgramDiagnostic:
                 verbose     = verbose,
                 log_header  = log_header,
                 error_message = error_message,
+                trace_output_path=output_path,
+                trace_context={
+                    "module": "llm_diagnostic",
+                    "operation": "_diagnose_pos_neg",
+                    "task_id": task.id,
+                    "iteration": iter,
+                    "stage": "Diagnosis",
+                },
             )
 
         except Exception as err:
@@ -355,6 +371,14 @@ class ProgramDiagnostic:
                     verbose=verbose,
                     log_header=log_header,
                     error_message=error_message,
+                    trace_output_path=output_path,
+                    trace_context={
+                        "module": "llm_diagnostic",
+                        "operation": "_diagnose_program_insights",
+                        "task_id": task.id,
+                        "iteration": iter,
+                        "stage": "Diagnosis",
+                    },
                 )
             except Exception:
                 # Fallback: keep all insights as positive (no filtering)
@@ -647,7 +671,15 @@ class ProgramDiagnostic:
                     sleep_sec   = 2,
                     verbose     = verbose,
                     log_header  = log_header,
-                    error_message = error_message
+                    error_message = error_message,
+                    trace_output_path=output_path,
+                    trace_context={
+                        "module": "llm_diagnostic",
+                        "operation": "_diagnose_unretrieved_validate_issues",
+                        "task_id": task.id,
+                        "iteration": iter,
+                        "stage": "Diagnosis",
+                    },
                 )
                 
             except Exception as err:
@@ -835,7 +867,16 @@ class ProgramDiagnostic:
                     sleep_sec   = 2,
                     verbose     = verbose,
                     log_header  = log_header,
-                    error_message = error_message
+                    error_message = error_message,
+                    trace_output_path=output_path,
+                    trace_context={
+                        "module": "llm_diagnostic",
+                        "operation": "debug_program",
+                        "task_id": task.id,
+                        "iteration": iter,
+                        "attempt": attempt,
+                        "stage": "Program",
+                    },
                 )
 
                 # Update prompt context with new failed program

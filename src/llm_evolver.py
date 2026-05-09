@@ -137,7 +137,16 @@ class LibraryEvolution:
                 max_retry=3,
                 sleep_sec=0.5,
                 verbose=verbose,
-                error_message=error_message 
+                error_message=error_message,
+                trace_output_path=output_dir or None,
+                trace_context={
+                    "module": "llm_evolver",
+                    "operation": "generate_neg_condition",
+                    "task_id": task.id,
+                    "iteration": iter,
+                    "insight_id": insight.insight_id,
+                    "stage": "Diagnosis",
+                },
             )
             # print(refined_result)
 
@@ -201,7 +210,16 @@ class LibraryEvolution:
                 max_retry=3,
                 sleep_sec=0.5,
                 verbose=verbose,
-                error_message=error_message 
+                error_message=error_message,
+                trace_output_path=output_dir or None,
+                trace_context={
+                    "module": "llm_evolver",
+                    "operation": "generate_unr_condition",
+                    "task_id": task.id,
+                    "iteration": iter,
+                    "insight_id": insight.insight_id,
+                    "stage": "Diagnosis",
+                },
             )
             # print(refined_result)
 
@@ -246,7 +264,14 @@ class LibraryEvolution:
                 sleep_sec=0.5,
                 verbose=verbose,
                 log_header=custom_header,
-                error_message=error_message
+                error_message=error_message,
+                trace_context={
+                    "module": "llm_evolver",
+                    "operation": "refine_insight",
+                    "iteration": iter,
+                    "insight_id": insight.insight_id,
+                    "stage": "Diagnosis",
+                },
             )
         except Exception:
             traceback.print_exc()

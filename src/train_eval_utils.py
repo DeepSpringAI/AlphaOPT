@@ -611,7 +611,14 @@ def self_debug(
                 temperature = 0,
                 max_retry   = 3,                  
                 sleep_sec   = 2,
-                verbose     = False
+                verbose     = False,
+                trace_context={
+                    "module": "train_eval_utils",
+                    "operation": "self_debug",
+                    "task_id": task.id,
+                    "attempt": attempt,
+                    "stage": "Program",
+                },
             )
 
             # Update prompt context with new failed program
@@ -685,7 +692,14 @@ def self_correction(
                 temperature = 0,
                 max_retry   = 3,                  
                 sleep_sec   = 2,
-                verbose     = False
+                verbose     = False,
+                trace_context={
+                    "module": "train_eval_utils",
+                    "operation": "self_correction",
+                    "task_id": task.id,
+                    "attempt": attempt,
+                    "stage": "Program",
+                },
             )
 
             # Update prompt context with new failed program

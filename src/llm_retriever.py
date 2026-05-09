@@ -72,7 +72,9 @@ class LibraryRetrieval:
                     batch_size: int = 30,
                     custom_header: str = "",
                     error_message: str = "",
-                    verbose: bool = False) -> List[dict]:
+                    verbose: bool = False,
+                    trace_output_path: str | None = None,
+                    trace_context: dict | None = None) -> List[dict]:
         """
         Generic function for processing insights in batches
         Returns:
@@ -110,7 +112,15 @@ class LibraryRetrieval:
                     sleep_sec=0.5,
                     verbose=verbose,
                     log_header=batch_header,
-                    error_message=batch_error
+                    error_message=batch_error,
+                    trace_output_path=trace_output_path,
+                    trace_context={
+                        **(trace_context or {}),
+                        "operation": "applicability_batch_check",
+                        "batch_index": batch_idx + 1,
+                        "batch_total": len(batches),
+                        "batch_size": len(batch),
+                    },
                 )
                 
                 # Merge results
@@ -150,6 +160,8 @@ class LibraryRetrieval:
                         mathematical_model=formulation,
                         taxo=json.dumps(self.library.taxonomy["Code Implementation"], indent=2, ensure_ascii=False)
                             )
+
+        trace_output_path = f"{output_path}/{stage}" if output_path else None
             
         custom_header = f"\n==========\n[Iteration {iter}] Quickly match library insights by taxnomoy for [{stage}] generation of Task {task.id}\n==========\n"
         error_message = f"\n   [{stage}] Task {task.id} failed to extract matched insight labels after maximum attempts\n"
@@ -166,13 +178,25 @@ class LibraryRetrieval:
                 sleep_sec=5,
                 verbose=verbose,
                 log_header=custom_header,
-                error_message=error_message
+                error_message=error_message,
+                trace_output_path=trace_output_path,
+                trace_context={
+                    "operation": "quick_match_by_taxonomy",
+                    "task_id": task.id,
+                    "stage": stage,
+                    "iteration": iter,
+                },
             )
 
-        # Handle malformed LLM outputs by treating them as no matched taxonomy labels to ensure continued execution
+        # Treat provider/parse failures as "no matched labels" so evaluation can continue.
         except Exception as err:
-            print(f"\n   [{stage}] Task {task.id}: Handle malformed LLM outputs after maximum retry as no matched taxonomy labels\n")
-            traceback.print_exc() # print error and cause
+            print(
+                f"\n   [{stage}] Task {task.id}: taxonomy matching request failed; "
+                "continuing with no matched taxonomy labels."
+            )
+            if "content_filter" in str(err).lower() or "responsibleaipolicyviolation" in str(err).lower():
+                print("   Cause looks like Azure content filtering. Check local _llm_traces artifacts for prompt/context.")
+            traceback.print_exc()
             return {}
 
         # If no taxonomy labels are matched by LLM
@@ -285,7 +309,13 @@ class LibraryRetrieval:
             batch_size=batch_size,
             custom_header=custom_header,
             error_message=error_message,
-            verbose=verbose
+            verbose=verbose,
+            trace_output_path=f"{output_path}/{stage}" if output_path else None,
+            trace_context={
+                "task_id": task.id,
+                "stage": stage,
+                "iteration": iter,
+            },
         )
         # If no insights are matched by LLM
         if applicable_results == []: 
@@ -354,13 +384,26 @@ class LibraryRetrieval:
                     sleep_sec=5,
                     verbose=verbose,
                     log_header=custom_header,
-                    error_message=error_message
+                    error_message=error_message,
+                    trace_output_path=f"{output_path}/Diagnosis" if output_path else None,
+                    trace_context={
+                        "operation": "diagnosis_quick_match_taxonomy",
+                        "task_id": task.id,
+                        "stage": "Diagnosis",
+                        "iteration": iter,
+                        "diagnosis_issue_id": idx,
+                    },
                 )
 
-            # Handle malformed LLM outputs by treating them as no matched taxonomy labels to ensure continued execution
+            # Treat provider/parse failures as "no matched labels" so diagnosis can continue.
             except Exception as err:
-                print(f"\n    Task {task.id} [Diagnosis]: Handle malformed LLM outputs after maximum retry as no matched taxonomy labels\n")
-                traceback.print_exc() # print error and cause
+                print(
+                    f"\n    Task {task.id} [Diagnosis]: taxonomy matching request failed; "
+                    "continuing with no matched taxonomy labels."
+                )
+                if "content_filter" in str(err).lower() or "responsibleaipolicyviolation" in str(err).lower():
+                    print("    Cause looks like Azure content filtering. Check local _llm_traces artifacts for prompt/context.")
+                traceback.print_exc()
                 return {}
 
             # If no taxonomy labels are matched by LLM
@@ -419,7 +462,14 @@ class LibraryRetrieval:
                 batch_size=batch_size,
                 custom_header=custom_header,
                 error_message=error_message,
-                verbose=verbose
+                verbose=verbose,
+                trace_output_path=f"{output_path}/Diagnosis" if output_path else None,
+                trace_context={
+                    "task_id": task.id,
+                    "stage": "Diagnosis",
+                    "iteration": iter,
+                    "diagnosis_issue_id": idx,
+                },
             )
 
             # If no insights are matched by LLM
