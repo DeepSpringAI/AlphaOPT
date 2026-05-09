@@ -2,7 +2,13 @@ import os
 import time
 import json
 import argparse
-from src.config import get_train_config_path
+from src.config import (
+    get_train_config_path,
+    prepare_training_artifact_paths,
+    copy_shared_artifacts_to_training_subdir,
+    get_seed_taxonomy_path,
+    write_training_run_metadata,
+)
 
 def main():
     #* Configure
@@ -31,9 +37,16 @@ def main():
     from src.llm_retriever import LibraryRetrieval
     from src.llm_evolver import LibraryEvolution
 
-    #* Generate a timestamp and append it to output_folder
-    # Re-resolve
+    config, run_lib_dir = prepare_training_artifact_paths(config, config_path=args.config)
+    copied_shared_artifacts = copy_shared_artifacts_to_training_subdir(config)
+    os.environ["ALPHAOPT_SEED_TAXONOMY_PATH"] = get_seed_taxonomy_path(config)
     OmegaConf.resolve(config)
+    metadata_path = write_training_run_metadata(config, config_path=args.config)
+    print(f"Experience-library subdirectory: {config.library_subdir}")
+    print(f"Experience-library artifacts: {run_lib_dir}")
+    if copied_shared_artifacts:
+        print(f"Copied shared artifacts: {', '.join(copied_shared_artifacts)}")
+    print(f"Run metadata: {metadata_path}")
 
     # Initialize the LLM agents
     # Advanced models use OpenRouter
@@ -60,8 +73,8 @@ def main():
             train_data_path = f"{config.file_paths.train_output_dir}/train_tasks_record_base.json"
             lib_path = f"{config.file_paths.lib_dir}/library_base.json"
             taxo_path = f"{config.file_paths.lib_dir}/latest_taxonomy_base.json"
-            # lib_path = "./data/experience_library/iterations/train_data_4o/library_diag_iter1.json"
-            # taxo_path = "./data/experience_library/iterations/train_data_4o/latest_taxonomy_diag_iter1.json"
+            # lib_path = "./data/experience_library/train_data_4o/library_diag_iter1.json"
+            # taxo_path = "./data/experience_library/train_data_4o/latest_taxonomy_diag_iter1.json"
         else:
             train_data_path = f"{config.file_paths.train_output_dir}/train_tasks_record_diag_iter{start_iter-1}.json"
             lib_path = f"{config.file_paths.lib_dir}/library_refine_iter{start_iter-1}.json"

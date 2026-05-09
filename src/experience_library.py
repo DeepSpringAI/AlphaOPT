@@ -143,7 +143,11 @@ class ExperienceLibrary:
             for ins in insight_list:
                 self._library.append(Insight(ins))
 
-        with open("./data/experience_library/fewshot_taxonomy.json", "r", encoding="utf-8") as f:
+        seed_taxonomy_path = os.getenv(
+            "ALPHAOPT_SEED_TAXONOMY_PATH",
+            "./data/experience_library/shared/fewshot_taxonomy.json",
+        )
+        with open(seed_taxonomy_path, "r", encoding="utf-8") as f:
             self.taxonomy = json.load(f)
         # self._taxo_lock = threading.RLock()
 
@@ -422,7 +426,7 @@ class ExperienceLibrary:
              while the canonical taxonomy is
              {"General Formulation": {"Objective Specification": {"Redundant Auxiliary Variables": null}}}).
             """
-            canonical_path = "./data/experience_library/iterations/train_data_4o_flash/latest_taxonomy_refine_iter1.json"
+            canonical_path = "./data/experience_library/gpt54_gurobi_train_data_all_452/latest_taxonomy_refine_iter1.json"
             if not os.path.isfile(canonical_path):
                 return {}
 
@@ -841,8 +845,8 @@ class ExperienceLibrary:
 # Usage example
 if __name__ ==  "__main__":
     # Load the library
-    lib_path = "./data/experience_library/iterations/train_data_4o/library_diag_iter1.json"
-    taxo_path = "./data/experience_library/iterations/train_data_4o/latest_taxonomy_diag_iter1.json"
+    lib_path = "./data/experience_library/train_data_4o/library_diag_iter1.json"
+    taxo_path = "./data/experience_library/train_data_4o/latest_taxonomy_diag_iter1.json"
     library = ExperienceLibrary.from_json_file(
         library_path = lib_path,
         taxonomy_path = taxo_path)

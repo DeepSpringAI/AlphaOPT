@@ -528,8 +528,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run AlphaOPT evaluation")
     parser.add_argument(
         "--config",
-        default="./eval_config.yaml",
-        help="Path to evaluation config YAML file (default: ./eval_config.yaml)",
+        default="./configs/eval/default.yaml",
+        help="Path to evaluation config YAML file (default: ./configs/eval/default.yaml)",
     )
     args = parser.parse_args()
 

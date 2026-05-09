@@ -41,8 +41,7 @@ Self-Improve-LLM-OPT/
 ├── library_diagnosis.py        # Library diagnosis
 ├── library_online_learning.py  # Online learning
 ├── library_refinement.py       # Library refinement
-├── train_config.yaml          # Training parameter config
-├── eval_config.yaml           # Evaluation parameter config
+├── configs/                    # Training/evaluation config tree
 ├── pyproject.toml             # Dependencies (managed with uv)
 ├── uv.lock                    # Locked dependency versions
 └── Makefile                   # Common dev workflows
@@ -87,14 +86,14 @@ make exp-e2
 
 Library locations used by these commands:
 
-- Original preserved library: `data/experience_library/original_gpt4o_gurobi_library.json`
-- Original preserved taxonomy: `data/experience_library/original_gpt4o_gurobi_taxonomy.json`
-- Retrained E2 library output: `data/experience_library/iterations/e2_gpt54_gurobi_train_data_all_452/library_refine_iter1.json`
-- Retrained E2 taxonomy output: `data/experience_library/iterations/e2_gpt54_gurobi_train_data_all_452/latest_taxonomy_refine_iter1.json`
+- Default preserved library: `data/experience_library/default/library.json`
+- Default preserved taxonomy: `data/experience_library/default/latest_taxonomy.json`
+- Retrained E2 library output: `data/experience_library/gpt54_gurobi_train_data_all_452/library_refine_iter1.json`
+- Retrained E2 taxonomy output: `data/experience_library/gpt54_gurobi_train_data_all_452/latest_taxonomy_refine_iter1.json`
 
 **2. API Key Configuration**
 
-Configure LLM API keys in `train_config.yaml` and `eval_config.yaml`:
+Configure LLM API keys in `configs/train/default.yaml` and `configs/eval/default.yaml`:
 
 **Supported LLM Interfaces:**
 - OpenAI GPT series
@@ -111,7 +110,7 @@ Configure LLM API keys in `train_config.yaml` and `eval_config.yaml`:
     **Configuration Example:**
     
     ```yaml
-    # train_config.yaml
+    # configs/train/default.yaml
     base_model: google/gemini-2.5-flash   # or e.g., openai/gpt-4o
     advanced_model: openai/gpt-4o         # or e.g., gemini-2.5-pro
     base_service: openrouter              # or null for direct API
@@ -122,7 +121,7 @@ Configure LLM API keys in `train_config.yaml` and `eval_config.yaml`:
       GEMINI_API_KEY: "your-gemini-key"
       OPENAI_API_KEY: "your-openai-key"
 
-    # eval_config.yaml
+    # configs/eval/default.yaml
     model: openai/gpt-4o
     service: openrouter  # or null for direct API
     temperature: 0.0
@@ -130,10 +129,20 @@ Configure LLM API keys in `train_config.yaml` and `eval_config.yaml`:
 
 **3. Experiment Settings**
 
-Configure training and evaluation parameters in `train_config.yaml` and `eval_config.yaml`:
+Configure training and evaluation parameters in `configs/train/default.yaml` and `configs/eval/default.yaml`:
 
-- **Training Parameters** (`train_config.yaml`): `num_iterations`, `batch_size`, `max_solution_attempts` (the maximum number of attempts for solution generation), `max_verify_attempts` (the maximum number of insight self-verification), etc.
-- **Evaluation Parameters** (`eval_config.yaml`): `data_path` (the file path of the evaluation dataset), `library_path` (the file path of the library to use), `ablation` (including parameters for ablation study, e.g., enable self-debug component). 
+- **Training Parameters** (`configs/train/default.yaml`): `num_iterations`, `batch_size`, `max_solution_attempts` (the maximum number of attempts for solution generation), `max_verify_attempts` (the maximum number of insight self-verification), etc.
+- **Evaluation Parameters** (`configs/eval/default.yaml`): `data_path` (the file path of the evaluation dataset), `library_path` (the file path of the library to use), `ablation` (including parameters for ablation study, e.g., enable self-debug component).
+
+The full config layout and naming guidance live in `configs/README.md`.
+
+Training writes experience-library artifacts into config-named subdirectories automatically:
+
+- `configs/train/default.yaml` writes to `data/experience_library/default/`
+- `configs/train/gpt54_gurobi_train_data_all_452.yaml` writes to `data/experience_library/gpt54_gurobi_train_data_all_452/`
+- each training subdirectory includes `run_metadata.json` and a resolved config snapshot
+- human-authored shared seed artifacts such as `data/experience_library/shared/fewshot_taxonomy.json` are copied into the dedicated training subdirectory when training starts
+- if a fresh run would reuse an existing non-empty subdirectory, AlphaOPT automatically creates `_<index>` variants such as `default_1` or `gpt54_gurobi_train_data_all_452_1`
 
 
 ### Example Data
@@ -145,8 +154,9 @@ Configure training and evaluation parameters in `train_config.yaml` and `eval_co
 - **Split Data** (`data/optimization_tasks/split/`): Used for train/test split, with one portion for library learning and another for testing
 
 **2. Experience Library Data**
-- **Learned Library** (`data/experience_library/library.json`): Experience library after library learning and library refinement in the training phase, which is used for insight retrieval on evaluation data
-- **Library Taxonomy** (`data/experience_library/latest_taxonomy.json`): Latest library insight taxonomy for retrieval
+- **Default Library** (`data/experience_library/default/library.json`): Preserved canonical library used by the default and GPT-4o+Gurobi-aligned evaluation setups
+- **Default Taxonomy** (`data/experience_library/default/latest_taxonomy.json`): Preserved canonical taxonomy used by the default and GPT-4o+Gurobi-aligned evaluation setups
+- **Shared Seed Taxonomy** (`data/experience_library/shared/fewshot_taxonomy.json`): Human-authored taxonomy seed copied into each new training subdirectory before training begins
 
 
 ## 🖊️ Citation

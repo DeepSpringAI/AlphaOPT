@@ -150,7 +150,7 @@ class InsightExtractor:
                 # ====== Repair taxonomy using canonical mapping when level-1 is missing ====== #
                 # This mirrors the logic in ExperienceLibrary.add_insights.
                 def _load_canonical_level2_to_level1() -> dict:
-                    canonical_path = "./data/experience_library/iterations/train_data_4o_flash/latest_taxonomy_refine_iter1.json"
+                    canonical_path = "./data/experience_library/gpt54_gurobi_train_data_all_452/latest_taxonomy_refine_iter1.json"
                     if not os.path.isfile(canonical_path):
                         return {}
 
@@ -728,6 +728,6 @@ if __name__ == "__main__":
 
     #* Add the new insights into the experience library
     library.add_insights(temp_lib)
-    library.save(f"./data/experience_library/iterations/integrated_train_new_label/library_iter{iter}_fulltaxo.json")
+    library.save(f"./data/experience_library/integrated_train_new_label/library_iter{iter}_fulltaxo.json")
     # Save updated taxonomy
-    library.save_taxonomy(f"./data/experience_library/iterations/integrated_train_new_label/latest_taxonomy_iter{iter}_fulltaxo.json")
+    library.save_taxonomy(f"./data/experience_library/integrated_train_new_label/latest_taxonomy_iter{iter}_fulltaxo.json")
