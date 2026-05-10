@@ -15,6 +15,7 @@ _INIT_LOCK = threading.Lock()
 _INDEX_LOCK = threading.Lock()
 _INITIALIZED = False
 _ENABLED = False
+_ENV_LOADED = False
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -35,7 +36,24 @@ def _env_int(name: str, default: int) -> int:
 
 
 def laminar_enabled() -> bool:
+    _load_default_laminar_env()
     return _env_bool("ALPHAOPT_LAMINAR_ENABLED", False)
+
+
+def _load_default_laminar_env() -> None:
+    global _ENV_LOADED
+    if _ENV_LOADED:
+        return
+    _ENV_LOADED = True
+    env_path = Path("infra/.env")
+    if not env_path.exists():
+        return
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(env_path, override=False)
+    except Exception:
+        pass
 
 
 def _fail_fast_enabled() -> bool:

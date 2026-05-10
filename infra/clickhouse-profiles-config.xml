@@ -3,10 +3,19 @@
     <default>
       <allow_experimental_json_type>1</allow_experimental_json_type>
     </default>
+    <readonly>
+      <readonly>2</readonly>
+      <allow_experimental_json_type>1</allow_experimental_json_type>
+    </readonly>
   </profiles>
   <users>
-    <default>
-      <profile>default</profile>
-    </default>
+    <lmnr_ro>
+      <password from_env="CLICKHOUSE_RO_PASSWORD"/>
+      <networks>
+        <ip>::/0</ip>
+      </networks>
+      <profile>readonly</profile>
+      <quota>default</quota>
+    </lmnr_ro>
   </users>
 </clickhouse>
