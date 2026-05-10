@@ -81,15 +81,15 @@ make exp-e1
 make exp-e2
 ```
 
-- `make exp-e1`: evaluates GPT-5.4 on all evaluation datasets using the preserved original GPT-4o + Gurobi library.
-- `make exp-e2`: retrains the library on the original train split with GPT-5.4 + Gurobi, then evaluates GPT-5.4 on all evaluation datasets.
+- `make exp-e1`: evaluates GPT-5.5 on all evaluation datasets using the preserved original GPT-4o + Gurobi library.
+- `make exp-e2`: retrains the library on the original train split with GPT-5.5 + Gurobi, then evaluates GPT-5.5 on all evaluation datasets.
 
 Library locations used by these commands:
 
 - Default preserved library: `data/experience_library/default/library.json`
-- Default preserved taxonomy: `data/experience_library/default/latest_taxonomy.json`
-- Retrained E2 library output: `data/experience_library/gpt54_gurobi_train_data_all_452/library_refine_iter1.json`
-- Retrained E2 taxonomy output: `data/experience_library/gpt54_gurobi_train_data_all_452/latest_taxonomy_refine_iter1.json`
+- Default preserved taxonomy: `data/experience_library/default/latest_taxonomy_new.json`
+- Retrained E2 library output: `data/experience_library/gpt55_gurobi_train_data_all_452/library_refine_iter1.json`
+- Retrained E2 taxonomy output: `data/experience_library/gpt55_gurobi_train_data_all_452/latest_taxonomy_refine_iter1.json`
 
 **2. API Key Configuration**
 
@@ -139,10 +139,10 @@ The full config layout and naming guidance live in `configs/README.md`.
 Training writes experience-library artifacts into config-named subdirectories automatically:
 
 - `configs/train/default.yaml` writes to `data/experience_library/default/`
-- `configs/train/gpt54_gurobi_train_data_all_452.yaml` writes to `data/experience_library/gpt54_gurobi_train_data_all_452/`
+- `configs/train/gpt55_gurobi_train_data_all_452.yaml` writes to `data/experience_library/gpt55_gurobi_train_data_all_452/`
 - each training subdirectory includes `run_metadata.json` and a resolved config snapshot
 - human-authored shared seed artifacts such as `data/experience_library/shared/fewshot_taxonomy.json` are copied into the dedicated training subdirectory when training starts
-- if a fresh run would reuse an existing non-empty subdirectory, AlphaOPT automatically creates `_<index>` variants such as `default_1` or `gpt54_gurobi_train_data_all_452_1`
+- if a fresh run would reuse an existing non-empty subdirectory, AlphaOPT automatically creates `_<index>` variants such as `default_1` or `gpt55_gurobi_train_data_all_452_1`
 
 
 ### Example Data
@@ -155,7 +155,7 @@ Training writes experience-library artifacts into config-named subdirectories au
 
 **2. Experience Library Data**
 - **Default Library** (`data/experience_library/default/library.json`): Preserved canonical library used by the default and GPT-4o+Gurobi-aligned evaluation setups
-- **Default Taxonomy** (`data/experience_library/default/latest_taxonomy.json`): Preserved canonical taxonomy used by the default and GPT-4o+Gurobi-aligned evaluation setups
+- **Default Taxonomy** (`data/experience_library/default/latest_taxonomy_new.json`): Paper-aligned preserved canonical taxonomy used by the default and GPT-4o+Gurobi-aligned evaluation setups
 - **Shared Seed Taxonomy** (`data/experience_library/shared/fewshot_taxonomy.json`): Human-authored taxonomy seed copied into each new training subdirectory before training begins
 
 

@@ -9,7 +9,7 @@ E2_TRAIN_CONFIG := configs/train/gpt55_gurobi_train_data_all_452.yaml
 E1_EVAL_CONFIG := configs/eval/gpt55_original_library.yaml
 E2_EVAL_CONFIG := configs/eval/gpt55_retrained_library.yaml
 E1_LIBRARY := data/experience_library/default/library.json
-E1_TAXONOMY := data/experience_library/default/latest_taxonomy.json
+E1_TAXONOMY := data/experience_library/default/latest_taxonomy_new.json
 E2_ARTIFACT_GLOB := data/experience_library/gpt55_gurobi_train_data_all_452*
 
 help: ## Show this help

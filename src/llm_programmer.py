@@ -2,6 +2,7 @@ import os
 import re
 import json
 import subprocess
+import sys
 from typing import Optional, List, Tuple
 import traceback
 from functools import partial
@@ -88,7 +89,7 @@ class ProgramGenerator:
         try:
             # Using subprocess to execute the code as a separate process
             result = subprocess.run(
-                ["python", "-u", "-"], 
+                [sys.executable, "-u", "-"], 
                 input=code_str,
                 text=True, 
                 capture_output=True, 

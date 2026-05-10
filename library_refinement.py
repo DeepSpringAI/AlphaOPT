@@ -304,8 +304,9 @@ def run_library_refinement(
             k: float(stats_after.get(k, 0.0) - stats_before.get(k, 0.0))
             for k in ("requests", "prompt_tokens", "completion_tokens", "total_tokens", "cost")
         }
-        # Only include vendors with non-zero cost
-        if vendor_delta.get("cost", 0.0) != 0.0:
+        # Keep vendors with any activity. Cost can be zero when pricing is unknown,
+        # but request/token counts are still needed for audit and price debugging.
+        if any(float(vendor_delta.get(k, 0.0) or 0.0) != 0.0 for k in ("requests", "prompt_tokens", "completion_tokens", "total_tokens", "cost")):
             token_usage_delta[vendor] = vendor_delta
 
     # Write refined conditions back to a copied library

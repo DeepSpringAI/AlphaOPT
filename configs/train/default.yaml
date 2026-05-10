@@ -60,6 +60,15 @@ pricing:
     gpt-5.2:
       prompt_per_million: 0.00
       completion_per_million: 0.00
+    gpt-5.5:
+      prompt_per_million: 5.00
+      completion_per_million: 30.00
+    gpt-5.5-pro:
+      prompt_per_million: 30.00
+      completion_per_million: 180.00
     gpt-5.4:
-      prompt_per_million: 0.00
-      completion_per_million: 0.00
+      prompt_per_million: 2.50
+      completion_per_million: 15.00
+    gpt-5.4-mini:
+      prompt_per_million: 0.75
+      completion_per_million: 4.50

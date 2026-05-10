@@ -16,6 +16,16 @@ from .config import load_train_config
 
 config = load_train_config()
 
+_KNOWN_MODEL_PRICING_USD_PER_M = {
+    # OpenAI standard processing prices, USD / 1M text tokens.
+    # Verified against OpenAI pricing/model docs on 2026-05-10.
+    "gpt-5.5": {"prompt_per_million": 5.00, "completion_per_million": 30.00},
+    "gpt-5.5-pro": {"prompt_per_million": 30.00, "completion_per_million": 180.00},
+    "gpt-5.4": {"prompt_per_million": 2.50, "completion_per_million": 15.00},
+    "gpt-5.4-mini": {"prompt_per_million": 0.75, "completion_per_million": 4.50},
+    "gpt-5": {"prompt_per_million": 1.25, "completion_per_million": 10.00},
+}
+
 
 # ==== Global token usage tracker ====
 TOKEN_USAGE: Dict[str, Dict[str, float]] = {
@@ -166,6 +176,108 @@ def _record_usage(
             usage["cost"] += float(cost)
 
 
+def _model_pricing_keys(model: str) -> list[str]:
+    raw = str(model or "").strip()
+    keys = [raw]
+    if "/" in raw:
+        keys.append(raw.rsplit("/", 1)[-1])
+    if ":" in raw:
+        keys.append(raw.split(":", 1)[0])
+    lowered = []
+    for key in keys:
+        if key and key not in lowered:
+            lowered.append(key)
+        low = key.lower()
+        if low and low not in lowered:
+            lowered.append(low)
+    return lowered
+
+
+def _pricing_containers() -> list[dict]:
+    """
+    Return pricing sections from active configs. Evaluation imports this module before
+    setting ALPHAOPT_EVAL_CONFIG, so price lookup must check env-configured files at
+    request time rather than relying only on the import-time train config.
+    """
+    containers: list[dict] = []
+    seen: set[str] = set()
+    try:
+        from omegaconf import OmegaConf
+    except Exception:
+        OmegaConf = None  # type: ignore[assignment]
+
+    for env_name in ("ALPHAOPT_EVAL_CONFIG", "ALPHAOPT_TRAIN_CONFIG"):
+        cfg_path = os.getenv(env_name)
+        if not cfg_path or cfg_path in seen or OmegaConf is None:
+            continue
+        seen.add(cfg_path)
+        try:
+            cfg = OmegaConf.load(cfg_path)
+            pricing = OmegaConf.to_container(getattr(cfg, "pricing", None), resolve=True)
+            if isinstance(pricing, dict):
+                containers.append(pricing)
+        except Exception:
+            continue
+
+    try:
+        if OmegaConf is not None:
+            pricing = OmegaConf.to_container(getattr(config, "pricing", None), resolve=True)
+        else:
+            pricing = getattr(config, "pricing", None)
+        if isinstance(pricing, dict):
+            containers.append(pricing)
+    except Exception:
+        pass
+
+    return containers
+
+
+def _lookup_configured_model_pricing(vendor: str, model: str) -> tuple[float, float] | None:
+    vendor_candidates = [vendor]
+    if vendor == "openrouter":
+        vendor_candidates.append("openai")
+    for pricing in _pricing_containers():
+        for vendor_key in vendor_candidates:
+            vendor_cfg = pricing.get(vendor_key)
+            if not isinstance(vendor_cfg, dict):
+                continue
+            model_cfg = None
+            for key in _model_pricing_keys(model):
+                if key in vendor_cfg:
+                    model_cfg = vendor_cfg[key]
+                    break
+            if model_cfg is None and vendor == "openrouter":
+                model_cfg = vendor_cfg.get("default")
+            if not isinstance(model_cfg, dict):
+                continue
+            p_per_m = float(model_cfg.get("prompt_per_million") or 0.0)
+            c_per_m = float(model_cfg.get("completion_per_million") or 0.0)
+            if p_per_m > 0.0 or c_per_m > 0.0:
+                return p_per_m, c_per_m
+    return None
+
+
+def _lookup_known_model_pricing(vendor: str, model: str) -> tuple[float, float] | None:
+    if vendor not in ("openai", "openrouter"):
+        return None
+    for key in _model_pricing_keys(model):
+        known = _KNOWN_MODEL_PRICING_USD_PER_M.get(key.lower())
+        if known:
+            return float(known["prompt_per_million"]), float(known["completion_per_million"])
+    return None
+
+
+def _estimate_text_tokens(text: Any) -> float:
+    """
+    Conservative fallback for OpenAI-compatible servers that omit usage.
+    Provider-reported usage is used whenever available.
+    """
+    plain = _prompt_to_text(text)
+    if not plain:
+        return 0.0
+    return max(1.0, float(len(plain)) / 4.0)
+
+
 def _estimate_cost(
     vendor: str,
     model: str,
@@ -175,29 +287,16 @@ def _estimate_cost(
     """
     Estimate USD cost for a single request based on token counts and config.pricing.
     """
-    pricing = getattr(config, "pricing", None)
-    if pricing is None:
-        return 0.0
-
     prompt_tokens = float(prompt_tokens or 0.0)
     completion_tokens = float(completion_tokens or 0.0)
 
-    # Get vendor config (gemini / openai / openrouter)
-    vendor_cfg = getattr(pricing, vendor, None)
-    if vendor_cfg is None:
+    configured = _lookup_configured_model_pricing(vendor, model)
+    known = _lookup_known_model_pricing(vendor, model)
+    rates = configured or known
+    if rates is None:
         return 0.0
 
-    # Try exact model key first
-    model_cfg = getattr(vendor_cfg, model, None)
-    # For OpenRouter we may not know concrete model → use "default"
-    if model_cfg is None and vendor == "openrouter":
-        model_cfg = getattr(vendor_cfg, "default", None)
-
-    if model_cfg is None:
-        return 0.0
-
-    p_per_m = float(getattr(model_cfg, "prompt_per_million", 0.0))
-    c_per_m = float(getattr(model_cfg, "completion_per_million", 0.0))
+    p_per_m, c_per_m = rates
 
     prompt_cost = (prompt_tokens / 1_000_000.0) * p_per_m
     completion_cost = (completion_tokens / 1_000_000.0) * c_per_m
@@ -229,9 +328,10 @@ def _build_client(model: str, service: str):
     load_dotenv()
     
     # Get API keys from config or fallback to environment variables
-    openrouter_key = config.api_keys.OPEN_ROUTER_KEY or os.getenv("OPEN_ROUTER_KEY")
-    gemini_key = config.api_keys.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY")
-    openai_key = config.api_keys.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY")
+    api_keys = getattr(config, "api_keys", None)
+    openrouter_key = (getattr(api_keys, "OPEN_ROUTER_KEY", None) if api_keys is not None else None) or os.getenv("OPEN_ROUTER_KEY")
+    gemini_key = (getattr(api_keys, "GEMINI_API_KEY", None) if api_keys is not None else None) or os.getenv("GEMINI_API_KEY")
+    openai_key = (getattr(api_keys, "OPENAI_API_KEY", None) if api_keys is not None else None) or os.getenv("OPENAI_API_KEY")
     
     if service and service.lower() != "null":
         from openai import OpenAI
@@ -795,16 +895,26 @@ def call_llm_and_parse_with_retry(
                 "messages": msgs,
                 "temperature": temperature
             }
-            # Add frequency_penalty for OpenAI vendor only
-            if vendor == "openai":
-                create_params["frequency_penalty"] = 0.5
             completion = client.chat.completions.create(**create_params)
 
-            # Token usage from Responses API
+            raw_text = completion.choices[0].message.content or ""
+
+            # Token usage from Chat Completions API. Some local/proxy OpenAI-compatible
+            # endpoints omit usage, so fall back to a text estimate to keep cost tracking
+            # non-zero and auditable for long experiments.
             usage = getattr(completion, "usage", None)
             prompt_tokens = getattr(usage, "prompt_tokens", None) if usage is not None else None
             completion_tokens = getattr(usage, "completion_tokens", None) if usage is not None else None
             total_tokens = getattr(usage, "total_tokens", None) if usage is not None else None
+            usage_estimated = False
+            if prompt_tokens is None:
+                prompt_tokens = _estimate_text_tokens(prompt)
+                usage_estimated = True
+            if completion_tokens is None:
+                completion_tokens = _estimate_text_tokens(raw_text)
+                usage_estimated = True
+            if total_tokens is None:
+                total_tokens = float(prompt_tokens or 0.0) + float(completion_tokens or 0.0)
 
             # Estimate cost from token usage
             cost = _estimate_cost(vendor, model, prompt_tokens, completion_tokens)
@@ -812,8 +922,11 @@ def call_llm_and_parse_with_retry(
             if vendor == "openrouter" and usage is not None:
                 explicit_cost = getattr(usage, "cost", None)
                 if explicit_cost is not None:
-                    # Prefer explicit cost if available
-                    cost = float(explicit_cost)
+                    # Prefer explicit non-zero cost if available; keep our estimate when
+                    # a proxy returns 0/None despite reporting tokens.
+                    explicit_cost = float(explicit_cost)
+                    if explicit_cost > 0.0:
+                        cost = explicit_cost
 
             _record_usage(
                 vendor,
@@ -832,9 +945,10 @@ def call_llm_and_parse_with_retry(
                 "usage_completion_tokens": completion_tokens,
                 "usage_total_tokens": total_tokens,
                 "usage_cost_usd": cost,
+                "usage_estimated": usage_estimated,
             }
 
-            return completion.choices[0].message.content, call_meta
+            return raw_text, call_meta
 
         # Gemini call
         if vendor == "gemini":
@@ -859,42 +973,42 @@ def call_llm_and_parse_with_retry(
                     ),
                 )
 
-            # Prefer usage_metadata from response to get prompt + completion tokens
+            # Prefer usage_metadata from response to get prompt + completion tokens.
+            # If unavailable, estimate both sides and record exactly once below.
             usage_meta = getattr(completion, "usage_metadata", None)
+            usage_estimated = False
             if usage_meta is not None:
                 prompt_tok = getattr(usage_meta, "prompt_token_count", None)
                 completion_tok = getattr(usage_meta, "candidates_token_count", None)
                 total_tok = getattr(usage_meta, "total_token_count", None)
-                cost = _estimate_cost("gemini", model, prompt_tok, completion_tok)
-                _record_usage(
-                    "gemini",
-                    prompt_tokens=prompt_tok,
-                    completion_tokens=completion_tok,
-                    total_tokens=total_tok,
-                    cost=cost,
-                )
             else:
-                # Fallback: approximate total tokens via models.count_tokens (prompt only)
+                prompt_tok = None
+                completion_tok = None
+                total_tok = None
+                # Fallback: ask Gemini to count prompt tokens when possible.
                 try:
-                    cost_fallback = 0.0
                     tokens = client.models.count_tokens(model=model, contents=prompt)
-                    total_tok = getattr(tokens, "total_tokens", None)
-                    if total_tok is not None:
-                        cost_fallback = _estimate_cost("gemini", model, total_tok, 0.0)
-                        _record_usage(
-                            "gemini",
-                            prompt_tokens=total_tok,
-                            total_tokens=total_tok,
-                            cost=cost_fallback,
-                        )
+                    prompt_tok = getattr(tokens, "total_tokens", None)
                 except Exception:
                     # Counting is best-effort; do not fail the main request
                     pass
 
-            prompt_tok = getattr(usage_meta, "prompt_token_count", None) if usage_meta is not None else None
-            completion_tok = getattr(usage_meta, "candidates_token_count", None) if usage_meta is not None else None
-            total_tok = getattr(usage_meta, "total_token_count", None) if usage_meta is not None else None
+            if prompt_tok is None:
+                prompt_tok = _estimate_text_tokens(prompt)
+                usage_estimated = True
+            if completion_tok is None:
+                completion_tok = _estimate_text_tokens(completion.text)
+                usage_estimated = True
+            if total_tok is None:
+                total_tok = float(prompt_tok or 0.0) + float(completion_tok or 0.0)
             usage_cost = _estimate_cost("gemini", model, prompt_tok, completion_tok)
+            _record_usage(
+                "gemini",
+                prompt_tokens=prompt_tok,
+                completion_tokens=completion_tok,
+                total_tokens=total_tok,
+                cost=usage_cost,
+            )
             call_meta = {
                 "provider": vendor,
                 "request_model": model,
@@ -904,6 +1018,7 @@ def call_llm_and_parse_with_retry(
                 "usage_completion_tokens": completion_tok,
                 "usage_total_tokens": total_tok,
                 "usage_cost_usd": usage_cost,
+                "usage_estimated": usage_estimated,
             }
             return completion.text, call_meta
 
@@ -982,6 +1097,7 @@ def call_llm_and_parse_with_retry(
                             "usage.completion_tokens": call_meta.get("usage_completion_tokens"),
                             "usage.total_tokens": call_meta.get("usage_total_tokens"),
                             "usage.cost_usd": call_meta.get("usage_cost_usd"),
+                            "usage.estimated": call_meta.get("usage_estimated"),
                             "observation.model": call_meta.get("response_model") or model,
                             "observation.input_id": (io_paths or {}).get("prompt_id"),
                             "observation.output_id": (io_paths or {}).get("response_id"),

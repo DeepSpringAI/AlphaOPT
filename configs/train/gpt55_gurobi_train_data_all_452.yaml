@@ -1,5 +1,5 @@
-base_model: gpt-5.4
-advanced_model: gpt-5.4
+base_model: gpt-5.5
+advanced_model: gpt-5.5
 base_service: http://127.0.0.1:4010/v1
 advanced_service: http://127.0.0.1:4010/v1
 verbose: false
@@ -20,7 +20,7 @@ params:
   variant_num: 5
 
 dataset: train_data_all_452
-output_folder: e2_gpt54_gurobi_train_data_all_452
+output_folder: e2_gpt55_gurobi_train_data_all_452
 library_subdir:
 shared_artifact_subdir: shared
 file_paths:
@@ -58,6 +58,15 @@ pricing:
     gpt-5.2:
       prompt_per_million: 0.00
       completion_per_million: 0.00
+    gpt-5.5:
+      prompt_per_million: 5.00
+      completion_per_million: 30.00
+    gpt-5.5-pro:
+      prompt_per_million: 30.00
+      completion_per_million: 180.00
     gpt-5.4:
-      prompt_per_million: 0.00
-      completion_per_million: 0.00
+      prompt_per_million: 2.50
+      completion_per_million: 15.00
+    gpt-5.4-mini:
+      prompt_per_million: 0.75
+      completion_per_million: 4.50

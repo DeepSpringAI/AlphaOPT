@@ -2,7 +2,7 @@
 datasets: [miplib_nl, optmath_bench]
 data_path_template: ./data/optimization_tasks/split/test_data/${dataset}.json
 library_path: ./data/experience_library/default/library.json
-taxonomy_path: ./data/experience_library/default/latest_taxonomy.json
+taxonomy_path: ./data/experience_library/default/latest_taxonomy_new.json
 output_folder_template: ${dataset}_eval
 model: gpt-5 
 service: http://127.0.0.1:4010/v1 # null

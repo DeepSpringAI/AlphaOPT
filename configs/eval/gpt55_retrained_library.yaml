@@ -1,11 +1,11 @@
 datasets: [nlp4lp_test, nl4opt_test, industryor_test, logior, optibench, optmath_bench]
 data_path_template: ./data/optimization_tasks/split/test_data/${dataset}.json
 
-library_path: ./data/experience_library/gpt54_gurobi_train_data_all_452/library_refine_iter1.json
-taxonomy_path: ./data/experience_library/gpt54_gurobi_train_data_all_452/latest_taxonomy_refine_iter1.json
+library_path: ./data/experience_library/gpt55_gurobi_train_data_all_452/library_refine_iter1.json
+taxonomy_path: ./data/experience_library/gpt55_gurobi_train_data_all_452/latest_taxonomy_refine_iter1.json
 
-output_folder_template: ${dataset}_eval_gpt54_e2_retrained
-model: gpt-5.4
+output_folder_template: ${dataset}_eval_gpt55_e2_retrained
+model: gpt-5.5
 service: http://127.0.0.1:4010/v1
 
 n_runs: 3

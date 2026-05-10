@@ -545,7 +545,20 @@ def run_library_online_learning(
             for future in tqdm(as_completed(futures), total=len(batch), desc=f"[Iteration {iter}] Library Online Learning Phase Batch {batch_idx} (tasks {start+1}-{start+len(batch)}) \n"):
                 # (start+i, task)
                 idx, task = futures[future]
-                new_insights, all_attempts_optimal, is_execution, is_verify, is_self_explore, first_attempt_optimal = future.result()
+                try:
+                    new_insights, all_attempts_optimal, is_execution, is_verify, is_self_explore, first_attempt_optimal = future.result()
+                except Exception:
+                    print(f"\n   [WARNING] Task {task.id}: online-learning worker failed; recording task failure and continuing.\n")
+                    import traceback
+                    traceback.print_exc()
+                    new_insights = []
+                    all_attempts_optimal = False
+                    is_execution = False
+                    is_verify = None
+                    is_self_explore = None
+                    first_attempt_optimal = False
+                    task.output_status.append(["experiment_error"])
+                    task.retri_ins_lst.append([])
 
                 if is_execution is False:
                     fail_to_execute_lst.append(task.id)
@@ -801,8 +814,9 @@ def run_library_online_learning(
             k: float(stats_after.get(k, 0.0) - stats_before.get(k, 0.0))
             for k in ("requests", "prompt_tokens", "completion_tokens", "total_tokens", "cost")
         }
-        # Only include vendors with non-zero cost
-        if vendor_delta.get("cost", 0.0) != 0.0:
+        # Keep vendors with any activity. Cost can be zero when pricing is unknown,
+        # but request/token counts are still needed for audit and price debugging.
+        if any(float(vendor_delta.get(k, 0.0) or 0.0) != 0.0 for k in ("requests", "prompt_tokens", "completion_tokens", "total_tokens", "cost")):
             token_usage_delta[vendor] = vendor_delta
 
     # Calculate the success rate for this iteration

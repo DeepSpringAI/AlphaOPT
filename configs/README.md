@@ -2,13 +2,13 @@
 
 - `configs/train/default.yaml`
   - Default training config.
-- `configs/train/gpt54_gurobi_train_data_all_452.yaml`
-  - Named training config for the GPT-5.4 + Gurobi setup.
+- `configs/train/gpt55_gurobi_train_data_all_452.yaml`
+  - Named training config for the GPT-5.5 + Gurobi setup.
 - `configs/eval/default.yaml`
   - Default evaluation config.
-- `configs/eval/gpt54_original_library.yaml`
+- `configs/eval/gpt55_original_library.yaml`
   - Evaluation config for the preserved default library.
-- `configs/eval/gpt54_retrained_library.yaml`
+- `configs/eval/gpt55_retrained_library.yaml`
   - Evaluation config for the retrained library.
 
 Keep new configs here with short descriptive filenames.
@@ -16,7 +16,7 @@ Keep new configs here with short descriptive filenames.
 Training writes experience-library artifacts into a subdirectory named after the train config:
 
 - `configs/train/default.yaml` writes to `data/experience_library/default/`
-- `configs/train/gpt54_gurobi_train_data_all_452.yaml` writes to `data/experience_library/gpt54_gurobi_train_data_all_452/`
+- `configs/train/gpt55_gurobi_train_data_all_452.yaml` writes to `data/experience_library/gpt55_gurobi_train_data_all_452/`
 
 The preserved shared assets live in:
 
@@ -27,8 +27,8 @@ The preserved canonical baseline artifacts live in:
 
 - `data/experience_library/default/`
   - `library.json`
-  - `latest_taxonomy.json`
-  - `latest_taxonomy_new.json`
+  - `latest_taxonomy_new.json` (paper-aligned default)
+  - `latest_taxonomy.json` (legacy)
 
 Each training subdirectory keeps the copied shared seed artifacts, final library, taxonomy snapshots, iterations, and run metadata together.
 

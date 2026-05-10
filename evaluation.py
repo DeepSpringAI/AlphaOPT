@@ -117,6 +117,7 @@ def evaluate(
 
         # Try multiple times for pass@k evaluation
         attempts_results = []
+        attempt_records = []
         for attempt in range(pass_at_k):
             attempt_output_path = f"{output_path}_attempt_{attempt + 1}" if pass_at_k > 1 else output_path
             
@@ -162,10 +163,27 @@ def evaluate(
                     is_optimal, runnable = self_debug(task, candidate_program, feedback, config)
 
             attempts_results.append((int(is_optimal), int(runnable), status))
+            attempt_records.append(
+                {
+                    "attempt": attempt + 1,
+                    "status": status,
+                    "is_optimal": bool(is_optimal),
+                    "runnable": bool(runnable),
+                    "is_time_out": bool(is_time_out) if is_time_out is not None else None,
+                    "output": str(output)[:2000],
+                    "formulation_path": f"{attempt_output_path}/model_iter_None.txt",
+                    "program_path": f"{attempt_output_path}/program_iter_None.py",
+                    "output_path": f"{attempt_output_path}/output_iter_None.txt",
+                }
+            )
             
             # If we found a successful solution, we can stop early for pass@k
             if is_optimal:
                 break
+
+        if not attempts_results:
+            attempts_results.append((0, 0, "no_attempts"))
+            attempt_records.append({"attempt": 0, "status": "no_attempts", "is_optimal": False, "runnable": False})
 
         # Record task (use the first attempt's results for recording)
         task.retri_ins_lst.append(retrieved_ins_ids)
@@ -180,6 +198,11 @@ def evaluate(
             int(attempts_results[0][1]),
             int(pass_at_k_success),
             int(pass_at_k_runnable),
+            {
+                "retrieved_insight_ids": retrieved_ins_ids,
+                "attempts": attempt_records,
+                "first_status": attempts_results[0][2],
+            },
         )
 
     def _restore_task_progress(task: "Task", record: dict[str, Any]) -> None:
@@ -211,7 +234,17 @@ def evaluate(
             }
             for future in concurrent.futures.as_completed(futures):
                 idx, task = futures[future]
-                opt, run, pass_k, pass_k_run = future.result()
+                try:
+                    opt, run, pass_k, pass_k_run, trace_payload = future.result()
+                except Exception as exc:
+                    opt, run, pass_k, pass_k_run = 0, 0, 0, 0
+                    trace_payload = {
+                        "retrieved_insight_ids": [],
+                        "attempts": [],
+                        "first_status": "experiment_error",
+                        "error": repr(exc),
+                    }
+                    task.output_status.append("experiment_error")
                 key = task_key(task.id)
                 completed_tasks[key] = {
                     "task_id": task.id,
@@ -220,7 +253,9 @@ def evaluate(
                         "pass_at_1_runnable": int(run),
                         "pass_at_k_success": int(pass_k),
                         "pass_at_k_runnable": int(pass_k_run),
+                        "status": trace_payload.get("first_status"),
                     },
+                    "trace": trace_payload,
                     "task_record": task.to_dict(mode="learn"),
                     "completed_at": now_timestamp(),
                 }

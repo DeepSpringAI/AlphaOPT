@@ -6,6 +6,7 @@ import json
 import traceback
 import subprocess
 import numbers
+import sys
 from typing import List, Tuple, Optional, Any, Callable
 
 from src.utils import cal_time_cost
@@ -558,7 +559,7 @@ def execute_code(code_str, timeout_sec=400):
     try:
         # Using subprocess to execute the code as a separate process
         result = subprocess.run(
-            ["python", "-u", "-"], 
+            [sys.executable, "-u", "-"], 
             input=code_str,
             text=True, 
             capture_output=True, 
