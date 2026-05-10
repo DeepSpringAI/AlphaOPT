@@ -11,6 +11,7 @@ from itertools import combinations
 from src.dataloader import DataLoader 
 from src.utils import cal_time_cost, get_token_usage
 from src.train_eval_utils import *
+from src.resume_state import now_timestamp, save_json_state
 
 
 def self_verify_merged_insights(iter, task, llm_opt, new_insights, all_merged_insights, prev_insights):
@@ -58,7 +59,10 @@ def run_library_online_learning(
     train_tasks,
     llm_retri, llm_opt, llm_diag, llm_ins, library, 
     params,
-    paths
+    paths,
+    *,
+    resume_state=None,
+    resume_state_path: str | None = None,
 ):
     """
     Run library learning phase on multithread
@@ -509,7 +513,11 @@ def run_library_online_learning(
     train_start_time = time.time()
     usage_before = get_token_usage()
 
-    for start in range(0, len(train_tasks), params.batch_size):
+    resume_batch_start = 0
+    if resume_state:
+        resume_batch_start = int((resume_state.get("online_learning") or {}).get("next_batch_start", 0) or 0)
+
+    for start in range(resume_batch_start, len(train_tasks), params.batch_size):
         batch = train_tasks[start:start + params.batch_size] 
         batch_new_insights = []  # Aggregate the new insights generated in this batch
         
@@ -761,10 +769,24 @@ def run_library_online_learning(
                 ins_merge_rate = (len(batch_new_insights) - len(all_tasks_new_insights)) / len(batch_new_insights) if batch_new_insights else None
                 batch_insight_merge_rate.append(ins_merge_rate)
 
-                # Periodically save library snapshot to prevent data loss
-                library.save(f"{paths.lib_dir}/library_base_snap.json")
-                library.save_taxonomy(f"{paths.lib_dir}/latest_taxonomy_base_snap.json")
-                train_tasks.save_as_json(f"{paths.train_output_dir}/train_tasks_record_base_snap.json")
+        # Save a batch-safe snapshot even if the batch produced no new insights.
+        library.save(f"{paths.lib_dir}/library_base_snap.json")
+        library.save_taxonomy(f"{paths.lib_dir}/latest_taxonomy_base_snap.json")
+        train_tasks.save_as_json(f"{paths.train_output_dir}/train_tasks_record_base_snap.json")
+        if resume_state is not None and resume_state_path:
+            online_state = resume_state.setdefault("online_learning", {})
+            online_state["status"] = "in_progress"
+            online_state["next_batch_start"] = int(start + len(batch))
+            online_state["completed_task_ids"] = [task.id for task in train_tasks[: start + len(batch)]]
+            online_state["snapshot_paths"] = {
+                "library": f"{paths.lib_dir}/library_base_snap.json",
+                "taxonomy": f"{paths.lib_dir}/latest_taxonomy_base_snap.json",
+                "tasks": f"{paths.train_output_dir}/train_tasks_record_base_snap.json",
+            }
+            resume_state["current_phase"] = "online_learning"
+            resume_state["current_iter"] = int(iter)
+            resume_state["updated_at"] = now_timestamp()
+            save_json_state(resume_state_path, resume_state)
 
         batch_train_duration = cal_time_cost(batch_train_start_time, f'Iteration {iter} Library Online Learning Phase Batch {batch_idx} [{start+1}-{start+len(batch)}]')
 
@@ -843,6 +865,13 @@ def run_library_online_learning(
         "online_learning_duration (min)": train_duration,
         "token_usage": token_usage_delta,
     }
+
+    if resume_state is not None and resume_state_path:
+        online_state = resume_state.setdefault("online_learning", {})
+        online_state["status"] = "completed"
+        online_state["next_batch_start"] = int(len(train_tasks))
+        resume_state["updated_at"] = now_timestamp()
+        save_json_state(resume_state_path, resume_state)
 
     return iter_metrics
 

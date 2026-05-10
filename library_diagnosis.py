@@ -10,6 +10,7 @@ from src.dataloader import DataLoader
 from src.utils import cal_time_cost, get_token_usage
 from src.train_eval_utils import *
 from src.llm_retriever import LibraryRetrieval
+from src.resume_state import now_timestamp, save_json_state, task_key
 
 def run_library_diagnosis(
     iter, 
@@ -18,6 +19,9 @@ def run_library_diagnosis(
     params, 
     paths, 
     max_workers = 8,
+    *,
+    resume_state=None,
+    resume_state_path: str | None = None,
 ):
     """
     Run library insight diagnosis through doing tasks
@@ -492,8 +496,6 @@ def run_library_diagnosis(
                 return [], False, True, None, True
 
 
-    # Experiment metrics 
-    # temp_lib = []
     train_success_flags = [False] * len(train_tasks)
 
     iter_diagnose_count = 0
@@ -524,13 +526,61 @@ def run_library_diagnosis(
     total_new_insights = 0
     successful_merges = 0
 
+    diagnosis_state = {}
+    completed_task_ids = set()
+    task_results_by_id = {}
+    if resume_state is not None:
+        diagnosis_state = resume_state.setdefault("diagnosis", {}).setdefault(
+            str(iter),
+            {
+                "status": "in_progress",
+                "completed_task_ids": [],
+                "task_results": {},
+            },
+        )
+        completed_task_ids = {task_key(task_id) for task_id in diagnosis_state.get("completed_task_ids", [])}
+        task_results_by_id = diagnosis_state.get("task_results", {})
+
+    def _save_diagnosis_snapshot() -> None:
+        with lock:
+            library_checkpoint = copy.deepcopy(library)
+        library_checkpoint.save(f"{paths.lib_dir}/library_iter{iter}_diag_snap.json")
+        library_checkpoint.save_taxonomy(f"{paths.lib_dir}/latest_taxonomy_iter{iter}_snap.json")
+        train_tasks.save_as_json(f"{paths.train_output_dir}/train_tasks_record_iter{iter}_snap.json")
+
+    def _mark_task_completed(task, idx: int, result_payload: dict[str, object]) -> None:
+        key = task_key(task.id)
+        if key in completed_task_ids:
+            return
+        completed_task_ids.add(key)
+        if resume_state is not None and resume_state_path:
+            diagnosis_state["status"] = "in_progress"
+            diagnosis_state["completed_task_ids"] = sorted(completed_task_ids)
+            diagnosis_state.setdefault("task_results", {})[key] = {
+                "result": result_payload,
+                "task_record": task.to_dict(mode="learn"),
+                "completed_at": now_timestamp(),
+            }
+            diagnosis_state["snapshot_paths"] = {
+                "library": f"{paths.lib_dir}/library_iter{iter}_diag_snap.json",
+                "taxonomy": f"{paths.lib_dir}/latest_taxonomy_iter{iter}_snap.json",
+                "tasks": f"{paths.train_output_dir}/train_tasks_record_iter{iter}_snap.json",
+            }
+            resume_state["current_phase"] = "diagnosis"
+            resume_state["current_iter"] = int(iter)
+            resume_state["updated_at"] = now_timestamp()
+            _save_diagnosis_snapshot()
+            save_json_state(resume_state_path, resume_state)
+
+
+    pending_task_results = {}
 
     def process_insights_queue():
         nonlocal processed_count, total_new_insights, successful_merges, processing_active
         # print("Start processing insights queue")
         while processing_active or not new_ins_queue.empty():
             try:
-                new_insights = new_ins_queue.get(timeout=0.2)
+                task_id, new_insights = new_ins_queue.get(timeout=0.2)
             
             except Empty:
                 # no work yet; loop again while producer is still active
@@ -682,13 +732,15 @@ def run_library_diagnosis(
                 processed_count += 1
                 if processed_count % 10 == 0:
                     try:
-                        library_checkpoint = copy.deepcopy(library)
-                        library_checkpoint.save(f"{paths.lib_dir}/library_iter{iter}_diag_snap.json")
-                        library_checkpoint.save_taxonomy(f"{paths.lib_dir}/latest_taxonomy_iter{iter}_snap.json")
-                        train_tasks.save_as_json(f"{paths.train_output_dir}/train_tasks_record_iter{iter}_snap.json")
+                        _save_diagnosis_snapshot()
                         print(f"[Iteration {iter}] Saved library snapshot after processing {processed_count} insights")
                     except Exception as e:
                         print(f"[Iteration {iter}] Warning: Failed to save snapshot: {e}")
+
+            pending = pending_task_results.pop(task_key(task_id), None)
+            if pending is not None:
+                _idx, task, result_payload = pending
+                _mark_task_completed(task, _idx, result_payload)
 
             new_ins_queue.task_done()
 
@@ -699,7 +751,22 @@ def run_library_diagnosis(
     # Training phase
     train_start_time = time.time()
     usage_before = get_token_usage()
-    with ThreadPoolExecutor(max_workers=6) as executor:   #max_workers
+    for idx, task in enumerate(train_tasks):
+        prior = task_results_by_id.get(task_key(task.id))
+        if not prior:
+            continue
+        result_payload = prior.get("result", {})
+        train_success_flags[idx] = bool(result_payload.get("is_success", False))
+        if result_payload.get("is_execution") is False:
+            fail_to_execute_lst.append(task.id)
+        if result_payload.get("is_verify") is False:
+            fail_to_verify_lst.append(task.id)
+        if result_payload.get("is_diagnosis") is not None:
+            iter_diagnose_count += 1
+            if result_payload.get("is_diagnosis") is True:
+                iter_diagnose_success += 1
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(
                 _train_worker,
@@ -707,11 +774,23 @@ def run_library_diagnosis(
                 os.path.join(paths.train_output_dir, f"task_{task.id}"),     # per-task output folder
             ): (idx, task)
             for idx, task in enumerate(train_tasks)
+            if task_key(task.id) not in completed_task_ids
         }
 
-        for future in tqdm(as_completed(futures), total=len(train_tasks), desc=f"[Iteration {iter}] Library Diagnosis Phase\n"):
+        for future in tqdm(
+            as_completed(futures),
+            total=len(futures),
+            desc=f"[Iteration {iter}] Library Diagnosis Phase\n",
+            initial=0,
+        ):
             idx, task = futures[future]
             new_insights, is_success, is_execution, is_verify, is_diagnosis = future.result()
+            result_payload = {
+                "is_success": bool(is_success),
+                "is_execution": is_execution,
+                "is_verify": is_verify,
+                "is_diagnosis": is_diagnosis,
+            }
 
             if is_execution is False:
                 fail_to_execute_lst.append(task.id)
@@ -726,12 +805,12 @@ def run_library_diagnosis(
 
             train_success_flags[idx] = is_success
             if new_insights:
-                # Add new_insights to queue to avoid version conflicts during parallel merging
-                # print("new_insights", new_insights)
                 with queue_lock:
-                    print('Start adding new insights')
-                    new_ins_queue.put(new_insights)
-                    print(f"Added new insights to queue! Now the queue has length {new_ins_queue.qsize()}")
+                    pending_task_results[task_key(task.id)] = (idx, task, result_payload)
+                    new_ins_queue.put((task.id, new_insights))
+                    print(f"Added new insights for task {task.id} to queue! Queue size: {new_ins_queue.qsize()}")
+            else:
+                _mark_task_completed(task, idx, result_payload)
 
     
     train_duration = cal_time_cost(train_start_time, f'Iteration {iter} Library Diagnosis Phase')
@@ -826,6 +905,14 @@ def run_library_diagnosis(
         "library_diagnosis_duration (min)": train_duration,
         "token_usage": token_usage_delta,
     }
+
+    if resume_state is not None and resume_state_path:
+        diagnosis_state["status"] = "completed"
+        diagnosis_state["completed_task_ids"] = sorted(completed_task_ids)
+        diagnosis_state["metrics"] = iter_metrics
+        resume_state["updated_at"] = now_timestamp()
+        _save_diagnosis_snapshot()
+        save_json_state(resume_state_path, resume_state)
 
     return iter_metrics
 

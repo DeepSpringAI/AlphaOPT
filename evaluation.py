@@ -16,6 +16,14 @@ from src.llm_programmer import ProgramGenerator
 from src.experience_library import ExperienceLibrary
 from src.llm_retriever import LibraryRetrieval
 from src.train_eval_utils import check_optimality, self_debug 
+from src.resume_state import (
+    add_metric_totals,
+    default_evaluation_state,
+    load_json_state,
+    now_timestamp,
+    save_json_state,
+    task_key,
+)
 
 def evaluate(
     tasks: List["Task"],
@@ -23,6 +31,11 @@ def evaluate(
     use_library: bool,
     library: Optional["ExperienceLibrary"],
     config: Any,
+    *,
+    resume_state_path: str,
+    tasks_save_path: str,
+    dataset: str,
+    run_idx: int,
 ) -> Tuple[int, int, int, float, dict]:
     """
     Evaluate the task success rate of a learned experience library on a test dataset
@@ -35,14 +48,41 @@ def evaluate(
         pass_at_k_rate: pass@k success rate
         token_usage_delta: token usage delta for this evaluation
     """
-    n_success = 0
-    n_runnable = 0
-    # dataset = config.dataset
     output_folder = config.output_folder
     pass_at_k = config.pass_at_k # Default to 1 if not specified
 
     # Track token usage before evaluation
     usage_before = get_token_usage()
+    resume_enabled = bool(getattr(config, "resume", True))
+    prior_state = (
+        load_json_state(
+            resume_state_path,
+            default_evaluation_state(
+                dataset=dataset,
+                run_idx=run_idx,
+                output_folder=output_folder,
+                use_library=use_library,
+            ),
+        )
+        if resume_enabled
+        else default_evaluation_state(
+            dataset=dataset,
+            run_idx=run_idx,
+            output_folder=output_folder,
+            use_library=use_library,
+        )
+    )
+    completed_tasks = prior_state.setdefault("completed_tasks", {})
+    aggregate = prior_state.setdefault(
+        "aggregate",
+        {
+            "n_success": 0,
+            "n_runnable": 0,
+            "n_pass_at_k_success": 0,
+            "n_pass_at_k_runnable": 0,
+        },
+    )
+    prior_token_usage_delta = prior_state.get("token_usage_delta_total", {})
 
     llm_retri = None
 
@@ -135,30 +175,98 @@ def evaluate(
         pass_at_k_success = any(result[0] for result in attempts_results)  # Any attempt succeeded
         pass_at_k_runnable = any(result[1] for result in attempts_results)  # Any attempt was runnable
         
-        return int(attempts_results[0][0]), int(attempts_results[0][1]), int(pass_at_k_success), int(pass_at_k_runnable)
-    
-    output_dirs = [f"testing/{output_folder}/task_{task.id}" for task in tasks]
-    # Use ThreadPoolExecutor to process tasks concurrently
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-        results = list(tqdm(executor.map(process_task, tasks, output_dirs), total=len(tasks), desc="Evaluating\n"))
+        return (
+            int(attempts_results[0][0]),
+            int(attempts_results[0][1]),
+            int(pass_at_k_success),
+            int(pass_at_k_runnable),
+        )
 
-    # Calculate the number of successes and successful executions from the results
-    n_success = sum(opt for opt, _, _, _ in results)  # pass@1 success
-    n_runnable = sum(run for _, run, _, _ in results)  # pass@1 runnable
-    n_pass_at_k_success = sum(pass_k for _, _, pass_k, _ in results)  # pass@k success
-    n_pass_at_k_runnable = sum(pass_k_run for _, _, _, pass_k_run in results)  # pass@k runnable
+    def _restore_task_progress(task: "Task", record: dict[str, Any]) -> None:
+        task.output_status = record.get("output_status", [])
+        task.success_count = record.get("success_count", 0)
+        task.confidence = record.get("success_confidence", record.get("confidence", 0))
+        task.fail_to_execute = record.get("fail_to_execute", 0)
+        task.fail_to_verify = record.get("fail_to_verify", 0)
+        task.retri_ins_lst = record.get("retrieved_insights", [])
+
+    for task in tasks:
+        saved = completed_tasks.get(task_key(task.id))
+        if saved and saved.get("task_record"):
+            _restore_task_progress(task, saved["task_record"])
+
+    output_dirs = [f"testing/{output_folder}/task_{task.id}" for task in tasks]
+    pending = [
+        (idx, task, output_dir)
+        for idx, (task, output_dir) in enumerate(zip(tasks, output_dirs))
+        if task_key(task.id) not in completed_tasks
+    ]
+
+    progress = tqdm(total=len(tasks), initial=len(completed_tasks), desc="Evaluating\n")
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+            futures = {
+                executor.submit(process_task, task, output_dir): (idx, task)
+                for idx, task, output_dir in pending
+            }
+            for future in concurrent.futures.as_completed(futures):
+                idx, task = futures[future]
+                opt, run, pass_k, pass_k_run = future.result()
+                key = task_key(task.id)
+                completed_tasks[key] = {
+                    "task_id": task.id,
+                    "result": {
+                        "pass_at_1_success": int(opt),
+                        "pass_at_1_runnable": int(run),
+                        "pass_at_k_success": int(pass_k),
+                        "pass_at_k_runnable": int(pass_k_run),
+                    },
+                    "task_record": task.to_dict(mode="learn"),
+                    "completed_at": now_timestamp(),
+                }
+                aggregate["n_success"] += int(opt)
+                aggregate["n_runnable"] += int(run)
+                aggregate["n_pass_at_k_success"] += int(pass_k)
+                aggregate["n_pass_at_k_runnable"] += int(pass_k_run)
+                current_delta = {}
+                usage_after_partial = get_token_usage()
+                for vendor, stats_after in usage_after_partial.items():
+                    stats_before = usage_before.get(vendor, {})
+                    current_delta[vendor] = {
+                        k: float(stats_after.get(k, 0.0) - stats_before.get(k, 0.0))
+                        for k in ("requests", "prompt_tokens", "completion_tokens", "total_tokens", "cost")
+                    }
+                prior_state["token_usage_delta_total"] = add_metric_totals(prior_token_usage_delta, current_delta)
+                prior_state["updated_at"] = now_timestamp()
+                save_json_state(resume_state_path, prior_state)
+                Path(tasks_save_path).parent.mkdir(parents=True, exist_ok=True)
+                test_loader = DataLoader(task_list=list(tasks))
+                test_loader.save_as_json(tasks_save_path)
+                progress.update(1)
+    finally:
+        progress.close()
+
+    n_success = int(aggregate.get("n_success", 0))
+    n_runnable = int(aggregate.get("n_runnable", 0))
+    n_pass_at_k_success = int(aggregate.get("n_pass_at_k_success", 0))
+    n_pass_at_k_runnable = int(aggregate.get("n_pass_at_k_runnable", 0))
     
     pass_at_k_rate = n_pass_at_k_success / len(tasks) if len(tasks) > 0 else 0.0
     
     # Calculate token usage delta
     usage_after = get_token_usage()
-    token_usage_delta = {}
+    current_invocation_delta = {}
     for vendor, stats_after in usage_after.items():
         stats_before = usage_before.get(vendor, {})
-        token_usage_delta[vendor] = {
+        current_invocation_delta[vendor] = {
             k: float(stats_after.get(k, 0.0) - stats_before.get(k, 0.0))
             for k in ("requests", "prompt_tokens", "completion_tokens", "total_tokens", "cost")
         }
+    token_usage_delta = add_metric_totals(prior_token_usage_delta, current_invocation_delta)
+    prior_state["token_usage_delta_total"] = token_usage_delta
+    prior_state["status"] = "completed"
+    prior_state["updated_at"] = now_timestamp()
+    save_json_state(resume_state_path, prior_state)
     
     return n_success, n_runnable, len(tasks), pass_at_k_rate, token_usage_delta
 
@@ -337,14 +445,25 @@ def evaluate_single_dataset(config: Any, dataset: str) -> dict:
             if use_library
             else f"./testing/{run_output_folder}/tasks_record_nolib.json"
         )
+        resume_state_path = f"./testing/{run_output_folder}/evaluation_resume_state.json"
 
         print(f"\n--- Run {run_idx}/{n_runs} ---")
         print(f"Output folder (run): {run_output_folder}")
+        if bool(getattr(dataset_config, "resume", True)) and os.path.exists(resume_state_path):
+            print(f"Resume state detected: {resume_state_path}")
 
         # Run evaluation
         start_time = time.time()
         n_success, n_runnable, n_total, pass_at_k_rate, token_usage_delta = evaluate(
-            test_tasks, llm_opt, use_library, library, dataset_config
+            test_tasks,
+            llm_opt,
+            use_library,
+            library,
+            dataset_config,
+            resume_state_path=resume_state_path,
+            tasks_save_path=test_tasks_save_path,
+            dataset=dataset,
+            run_idx=run_idx,
         )
         success_rate = round(n_success / n_total, 3) if n_total else 0.0
         execution_rate = round(n_runnable / n_total, 3) if n_total else 0.0
@@ -531,11 +650,18 @@ def main() -> None:
         default="./configs/eval/default.yaml",
         help="Path to evaluation config YAML file (default: ./configs/eval/default.yaml)",
     )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Disable automatic resume and ignore any existing evaluation checkpoint state.",
+    )
     args = parser.parse_args()
 
     # Read the configuration file
     os.environ["ALPHAOPT_EVAL_CONFIG"] = args.config
     config = load_config(args.config)
+    if args.no_resume:
+        config.resume = False
     print(f"Evaluation config: {Path(args.config).resolve()}")
 
     # Get datasets list - support both single string and list
