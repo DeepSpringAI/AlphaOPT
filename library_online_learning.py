@@ -12,6 +12,15 @@ from src.dataloader import DataLoader
 from src.utils import cal_time_cost, get_token_usage
 from src.train_eval_utils import *
 from src.resume_state import now_timestamp, save_json_state
+from src.laminar_tracing import (
+    add_span_tags,
+    current_trace_id,
+    record_exception as laminar_record_exception,
+    record_trace_index,
+    set_span_attributes,
+    set_span_output,
+    trace_span,
+)
 
 
 def self_verify_merged_insights(iter, task, llm_opt, new_insights, all_merged_insights, prev_insights):
@@ -79,6 +88,76 @@ def run_library_online_learning(
         Parallelize pipeline on the minibatch of tasks (insight retrieval -> formulation generation -> insight retrieval -> program generation -> check optimality -> insight extraction -> insight verification) for training tasks
         Return: (new insights, all_attempts_optimal, is_execution, is_verify)
         """
+        nonlocal iter_self_verify_total, iter_self_verify_success_tasks, iter_self_verify_full_retrieval_tasks, iter_self_verify_partial_retrieval_tasks
+        with trace_span(
+            "alphaopt.training.online.task",
+            input={"task_id": task.id, "description": task.desc, "ground_truth": task.ground_truth},
+            tags=["alphaopt", "train", "online-learning", f"iter-{iter}"],
+            metadata={
+                "mode": "training",
+                "phase": "online_learning",
+                "task_id": task.id,
+                "iteration": iter,
+                "output_path": train_output_path,
+            },
+            attributes={
+                "alphaopt.mode": "training",
+                "alphaopt.phase": "online_learning",
+                "alphaopt.task_id": str(task.id),
+                "alphaopt.iteration": int(iter),
+            },
+        ) as root_span:
+            try:
+                result = _train_worker_impl(task, taxo_snapshot, train_output_path, temp_library, lock)
+                new_insights, all_attempts_optimal, is_execution, is_verify, is_self_explore, first_attempt_optimal = result
+                status = "optimal" if first_attempt_optimal else "not_optimal"
+                trace_id = current_trace_id()
+                set_span_attributes(root_span, {"alphaopt.status": status, "alphaopt.laminar_trace_id": trace_id})
+                add_span_tags(root_span, [status])
+                set_span_output(
+                    root_span,
+                    {
+                        "new_insights": len(new_insights or []),
+                        "all_attempts_optimal": bool(all_attempts_optimal),
+                        "is_execution": is_execution,
+                        "is_verify": is_verify,
+                        "is_self_explore": is_self_explore,
+                        "first_attempt_optimal": bool(first_attempt_optimal),
+                    },
+                )
+                record_trace_index(
+                    paths.train_output_dir,
+                    {
+                        "mode": "training",
+                        "phase": "online_learning",
+                        "task_id": task.id,
+                        "iteration": iter,
+                        "trace_id": trace_id,
+                        "status": status,
+                        "artifact_path": train_output_path,
+                    },
+                )
+                return result
+            except Exception as exc:
+                trace_id = current_trace_id()
+                laminar_record_exception(root_span, exc)
+                add_span_tags(root_span, ["experiment-error"])
+                set_span_attributes(root_span, {"alphaopt.status": "experiment_error", "alphaopt.laminar_trace_id": trace_id})
+                record_trace_index(
+                    paths.train_output_dir,
+                    {
+                        "mode": "training",
+                        "phase": "online_learning",
+                        "task_id": task.id,
+                        "iteration": iter,
+                        "trace_id": trace_id,
+                        "status": "experiment_error",
+                        "artifact_path": train_output_path,
+                    },
+                )
+                raise
+
+    def _train_worker_impl(task, taxo_snapshot, train_output_path, temp_library, lock):
         nonlocal iter_self_verify_total, iter_self_verify_success_tasks, iter_self_verify_full_retrieval_tasks, iter_self_verify_partial_retrieval_tasks
         
         success_counts = 0

@@ -11,6 +11,17 @@ from src.utils import cal_time_cost, get_token_usage
 from src.train_eval_utils import *
 from src.llm_retriever import LibraryRetrieval
 from src.resume_state import now_timestamp, save_json_state, task_key
+from src.laminar_tracing import (
+    add_span_tags,
+    current_trace_id,
+    deserialize_span_context,
+    record_exception as laminar_record_exception,
+    record_trace_index,
+    serialize_current_span_context,
+    set_span_attributes,
+    set_span_output,
+    trace_span,
+)
 
 def run_library_diagnosis(
     iter, 
@@ -35,6 +46,83 @@ def run_library_diagnosis(
         Parallelize the entire per-task pipeline (insight retrieval -> formulation generation -> insight retrieval -> program generation -> diagnosis -> insight extraction -> insight verification) for training tasks
         Return: (new insights, is_success, is_execution, is_verify, is_diagnosis)
         """
+        nonlocal iter_self_verify_total, iter_self_verify_success_tasks, iter_self_verify_full_retrieval_tasks, iter_self_verify_partial_retrieval_tasks
+        with trace_span(
+            "alphaopt.training.diagnosis.task",
+            input={"task_id": task.id, "description": task.desc, "ground_truth": task.ground_truth},
+            tags=["alphaopt", "train", "diagnosis", f"iter-{iter}"],
+            metadata={
+                "mode": "training",
+                "phase": "diagnosis",
+                "task_id": task.id,
+                "iteration": iter,
+                "output_path": train_output_path,
+            },
+            attributes={
+                "alphaopt.mode": "training",
+                "alphaopt.phase": "diagnosis",
+                "alphaopt.task_id": str(task.id),
+                "alphaopt.iteration": int(iter),
+            },
+        ) as root_span:
+            try:
+                result = _train_worker_impl(task, train_output_path)
+                new_insights, is_success, is_execution, is_verify, is_diagnosis = result
+                trace_id = current_trace_id()
+                status = "optimal" if is_success else "not_optimal"
+                span_context = serialize_current_span_context()
+                set_span_attributes(
+                    root_span,
+                    {
+                        "alphaopt.status": status,
+                        "alphaopt.laminar_trace_id": trace_id,
+                        "alphaopt.generated_insights": len(new_insights or []),
+                    },
+                )
+                add_span_tags(root_span, [status])
+                set_span_output(
+                    root_span,
+                    {
+                        "new_insights": len(new_insights or []),
+                        "is_success": bool(is_success),
+                        "is_execution": is_execution,
+                        "is_verify": is_verify,
+                        "is_diagnosis": is_diagnosis,
+                    },
+                )
+                record_trace_index(
+                    paths.train_output_dir,
+                    {
+                        "mode": "training",
+                        "phase": "diagnosis",
+                        "task_id": task.id,
+                        "iteration": iter,
+                        "trace_id": trace_id,
+                        "status": status,
+                        "artifact_path": train_output_path,
+                    },
+                )
+                return (*result, trace_id, span_context)
+            except Exception as exc:
+                trace_id = current_trace_id()
+                laminar_record_exception(root_span, exc)
+                add_span_tags(root_span, ["experiment-error"])
+                set_span_attributes(root_span, {"alphaopt.status": "experiment_error", "alphaopt.laminar_trace_id": trace_id})
+                record_trace_index(
+                    paths.train_output_dir,
+                    {
+                        "mode": "training",
+                        "phase": "diagnosis",
+                        "task_id": task.id,
+                        "iteration": iter,
+                        "trace_id": trace_id,
+                        "status": "experiment_error",
+                        "artifact_path": train_output_path,
+                    },
+                )
+                raise
+
+    def _train_worker_impl(task, train_output_path):
         nonlocal iter_self_verify_total, iter_self_verify_success_tasks, iter_self_verify_full_retrieval_tasks, iter_self_verify_partial_retrieval_tasks
 
         with lock:
@@ -580,7 +668,7 @@ def run_library_diagnosis(
         # print("Start processing insights queue")
         while processing_active or not new_ins_queue.empty():
             try:
-                task_id, new_insights = new_ins_queue.get(timeout=0.2)
+                task_id, new_insights, parent_context_payload = new_ins_queue.get(timeout=0.2)
             
             except Empty:
                 # no work yet; loop again while producer is still active
@@ -591,158 +679,188 @@ def run_library_diagnosis(
                 new_ins_queue.task_done()
                 continue
 
-            for new_insight in new_insights:
-                total_new_insights += 1
-
-                # Take a consistent snapshot of the current main library for ALL read-only operations
-                # in this online-merge attempt (avoid holding the lock across LLM calls).
-                with lock:
-                    lib_snapshot = copy.deepcopy(library)
-
-                merged_insights, merged_task_to_iter, parent_ids = llm_ins.conduct_insight_online_merge(
-                    new_insight=[new_insight],
-                    library=lib_snapshot,
-                    verbose=True
-                )
-
-                # If no merge occurred, add original insight directly
-                if not merged_insights:
-                    with lock:
-                        library.add_insights([new_insight], iter)
-                        library.update_taxonomy(new_insight)
-                    print(f"No merge occurred for task {new_insight['task_id']} , adding original insight!")
-                    continue
-
-                # If merge occurred, verify merged insights
-                merged_task_ids = merged_insights["task_id"] if merged_insights else []
-                target_tasks = train_tasks.subset_by_ids(merged_task_ids)
-
-                all_tasks_verified = True
-                for task in target_tasks:
-                    # Initialize prev_ins_ids for each task separately
-                    prev_ins_ids = []
-                    task_iter = merged_task_to_iter.get(task.id)
-                    if task_iter == -1 and task.retri_ins_lst:
-                        prev_ins_ids.extend(task.retri_ins_lst[-1])
-                    elif task.retri_ins_lst and len(task.retri_ins_lst) > task_iter:
-                        prev_ins_ids.extend(task.retri_ins_lst[task_iter])
-                    elif task.retri_ins_lst:
-                        prev_ins_ids.extend(task.retri_ins_lst[-1])
-                        
-                    prev_insights = lib_snapshot.retrieve_insights_by_id(prev_ins_ids) if prev_ins_ids else []
-
-                    # Get insights for verification based on task_iter
-                    if task_iter == -1:
-                        # For new_insight's task_id: use all new insights for this task (excluding current) + merged_insights
-                        # Handle both single task_id and list of task_ids (for merged insights)
-                        task_new_insights = []
-                        for ins in new_insights:
-                            if ins != new_insight:
-                                task_id = ins.get('task_id')
-                                if isinstance(task_id, list):
-                                    if task.id in task_id:
-                                        task_new_insights.append(ins)
-                                elif task_id == task.id:
-                                    task_new_insights.append(ins)
-                        task_new_insights.append(merged_insights)
-                    else:
-                        # For existing insights' task_id: use library insights from iteration 0, excluding merged ones
-                        task_new_insights = []
-                        for ins in lib_snapshot:
-
-                            if ins.iteration == task_iter:
+            parent_ctx = deserialize_span_context(parent_context_payload)
+            merge_tags = ["alphaopt", "train", "diagnosis", "online-merge", f"iter-{iter}"]
+            if parent_context_payload and parent_ctx is None:
+                merge_tags.append("trace-context-missing")
+            with trace_span(
+                "alphaopt.training.diagnosis.merge_queue",
+                input={"task_id": task_id, "new_insights": len(new_insights or [])},
+                tags=merge_tags,
+                parent_span_context=parent_ctx,
+                metadata={
+                    "mode": "training",
+                    "phase": "diagnosis_merge_queue",
+                    "task_id": task_id,
+                    "iteration": iter,
+                },
+                attributes={
+                    "alphaopt.mode": "training",
+                    "alphaopt.phase": "diagnosis_merge_queue",
+                    "alphaopt.task_id": str(task_id),
+                    "alphaopt.iteration": int(iter),
+                    "alphaopt.trace_context_missing": bool(parent_context_payload and parent_ctx is None),
+                },
+            ) as merge_span:
+                try:
+                    for new_insight in new_insights:
+                        total_new_insights += 1
+        
+                        # Take a consistent snapshot of the current main library for ALL read-only operations
+                        # in this online-merge attempt (avoid holding the lock across LLM calls).
+                        with lock:
+                            lib_snapshot = copy.deepcopy(library)
+        
+                        merged_insights, merged_task_to_iter, parent_ids = llm_ins.conduct_insight_online_merge(
+                            new_insight=[new_insight],
+                            library=lib_snapshot,
+                            verbose=True
+                        )
+        
+                        # If no merge occurred, add original insight directly
+                        if not merged_insights:
+                            with lock:
+                                library.add_insights([new_insight], iter)
+                                library.update_taxonomy(new_insight)
+                            print(f"No merge occurred for task {new_insight['task_id']} , adding original insight!")
+                            continue
+        
+                        # If merge occurred, verify merged insights
+                        merged_task_ids = merged_insights["task_id"] if merged_insights else []
+                        target_tasks = train_tasks.subset_by_ids(merged_task_ids)
+        
+                        all_tasks_verified = True
+                        for task in target_tasks:
+                            # Initialize prev_ins_ids for each task separately
+                            prev_ins_ids = []
+                            task_iter = merged_task_to_iter.get(task.id)
+                            if task_iter == -1 and task.retri_ins_lst:
+                                prev_ins_ids.extend(task.retri_ins_lst[-1])
+                            elif task.retri_ins_lst and len(task.retri_ins_lst) > task_iter:
+                                prev_ins_ids.extend(task.retri_ins_lst[task_iter])
+                            elif task.retri_ins_lst:
+                                prev_ins_ids.extend(task.retri_ins_lst[-1])
+                                
+                            prev_insights = lib_snapshot.retrieve_insights_by_id(prev_ins_ids) if prev_ins_ids else []
+        
+                            # Get insights for verification based on task_iter
+                            if task_iter == -1:
+                                # For new_insight's task_id: use all new insights for this task (excluding current) + merged_insights
                                 # Handle both single task_id and list of task_ids (for merged insights)
-                                task_id = ins.task_id
-                                if isinstance(task_id, list):
-                                    if task.id in task_id:
-                                        # Exclude only the parents that were actually merged
-                                        if ins.insight_id not in parent_ids:
-                                            task_new_insights.append(ins.to_dict())
-                                elif task_id == task.id:
-                                    # Exclude only the parents that were actually merged
-                                    if ins.insight_id not in parent_ids:
-                                        task_new_insights.append(ins.to_dict())
-                        task_new_insights.append(merged_insights)
-                    
-                    is_verify = self_verify_test(iter=None, task=task, llm_opt=llm_opt,
-                                                new_insights=task_new_insights, prev_insights=prev_insights)
-
-                    if not is_verify:
-                        all_tasks_verified = False
-                        break
-
-                if all_tasks_verified:
-                    with lock:
-                        # Parent insights might have been merged/removed by earlier online-merge operations.
-                        # If any parent is missing, skip merge and keep parents untouched.
-                        if parent_ids:
-                            main_ids = {ins.insight_id for ins in library}
-                            if not set(parent_ids).issubset(main_ids):
+                                task_new_insights = []
+                                for ins in new_insights:
+                                    if ins != new_insight:
+                                        ins_task_id = ins.get('task_id')
+                                        if isinstance(ins_task_id, list):
+                                            if task.id in ins_task_id:
+                                                task_new_insights.append(ins)
+                                        elif ins_task_id == task.id:
+                                            task_new_insights.append(ins)
+                                task_new_insights.append(merged_insights)
+                            else:
+                                # For existing insights' task_id: use library insights from iteration 0, excluding merged ones
+                                task_new_insights = []
+                                for ins in lib_snapshot:
+        
+                                    if ins.iteration == task_iter:
+                                        # Handle both single task_id and list of task_ids (for merged insights)
+                                        ins_task_id = ins.task_id
+                                        if isinstance(ins_task_id, list):
+                                            if task.id in ins_task_id:
+                                                # Exclude only the parents that were actually merged
+                                                if ins.insight_id not in parent_ids:
+                                                    task_new_insights.append(ins.to_dict())
+                                        elif ins_task_id == task.id:
+                                            # Exclude only the parents that were actually merged
+                                            if ins.insight_id not in parent_ids:
+                                                task_new_insights.append(ins.to_dict())
+                                task_new_insights.append(merged_insights)
+                            
+                            is_verify = self_verify_test(iter=None, task=task, llm_opt=llm_opt,
+                                                        new_insights=task_new_insights, prev_insights=prev_insights)
+        
+                            if not is_verify:
+                                all_tasks_verified = False
+                                break
+        
+                        if all_tasks_verified:
+                            with lock:
+                                # Parent insights might have been merged/removed by earlier online-merge operations.
+                                # If any parent is missing, skip merge and keep parents untouched.
+                                if parent_ids:
+                                    main_ids = {ins.insight_id for ins in library}
+                                    if not set(parent_ids).issubset(main_ids):
+                                        library.add_insights([new_insight], iter)
+                                        library.update_taxonomy(new_insight)
+                                        print(
+                                            f"Online merge skipped for task {new_insight['task_id']} due to missing parent ids in main library. "
+                                            f"Adding original insight!"
+                                        )
+                                        continue
+        
+                                # Compute merge_version from the parent insights being merged (depth-style: max(parent)+1).
+                                parent_versions = []
+                                if parent_ids:
+                                    # ExperienceLibrary supports sequence protocol (getitem/len); iterate to access Insight objects.
+                                    for _ins in library:
+                                        if _ins.insight_id in parent_ids:
+                                            parent_versions.append(getattr(_ins, "merge_version", 0))
+                                merged_insights["merge_version"] = (max(parent_versions) if parent_versions else 0) + 1
+                                merged_insights["refine_version"] = 0
+        
+                                # If taxonomy is invalid (e.g., a plain string), skip this merged insight to avoid crashes/data loss.
+                                taxo = merged_insights.get("taxonomy")
+                                if not isinstance(taxo, dict):
+                                    # Try JSON-dict string
+                                    if isinstance(taxo, str) and taxo.strip().startswith("{") and taxo.strip().endswith("}"):
+                                        try:
+                                            parsed = json.loads(taxo)
+                                        except Exception:
+                                            parsed = None
+                                        if isinstance(parsed, dict):
+                                            merged_insights["taxonomy"] = parsed
+                                    if not isinstance(merged_insights.get("taxonomy"), dict):
+                                        print(
+                                            f"[WARNING] Merged insight has invalid taxonomy; skipping merged insight and keeping parents. "
+                                            f"taxonomy_type={type(taxo).__name__}"
+                                        )
+                                        library.add_insights([new_insight], iter)
+                                        library.update_taxonomy(new_insight)
+                                        print(f"Online merge skipped for task {new_insight['task_id']} due to invalid taxonomy. Adding original insight!")
+                                        continue
+        
+                                # Remove only the existing insights that were actually merged (not all taxonomy-matched candidates).
+                                library.replace_merged_insights([{"insight_id": pid} for pid in parent_ids])
+                                library.add_insights([merged_insights], iter)
+                                library.update_taxonomy(merged_insights)
+                            successful_merges += 1
+                            print(f"Successfully merged insight for task {new_insight['task_id']} with existing library insights (self-verify only)!")
+                        else:
+                            with lock:
                                 library.add_insights([new_insight], iter)
                                 library.update_taxonomy(new_insight)
-                                print(
-                                    f"Online merge skipped for task {new_insight['task_id']} due to missing parent ids in main library. "
-                                    f"Adding original insight!"
-                                )
-                                continue
+                            print(f"Online merge failed for task {new_insight['task_id']}. Adding original insight!")
+        
+                        processed_count += 1
+                        if processed_count % 10 == 0:
+                            try:
+                                _save_diagnosis_snapshot()
+                                print(f"[Iteration {iter}] Saved library snapshot after processing {processed_count} insights")
+                            except Exception as e:
+                                print(f"[Iteration {iter}] Warning: Failed to save snapshot: {e}")
 
-                        # Compute merge_version from the parent insights being merged (depth-style: max(parent)+1).
-                        parent_versions = []
-                        if parent_ids:
-                            # ExperienceLibrary supports sequence protocol (getitem/len); iterate to access Insight objects.
-                            for _ins in library:
-                                if _ins.insight_id in parent_ids:
-                                    parent_versions.append(getattr(_ins, "merge_version", 0))
-                        merged_insights["merge_version"] = (max(parent_versions) if parent_versions else 0) + 1
-                        merged_insights["refine_version"] = 0
-
-                        # If taxonomy is invalid (e.g., a plain string), skip this merged insight to avoid crashes/data loss.
-                        taxo = merged_insights.get("taxonomy")
-                        if not isinstance(taxo, dict):
-                            # Try JSON-dict string
-                            if isinstance(taxo, str) and taxo.strip().startswith("{") and taxo.strip().endswith("}"):
-                                try:
-                                    parsed = json.loads(taxo)
-                                except Exception:
-                                    parsed = None
-                                if isinstance(parsed, dict):
-                                    merged_insights["taxonomy"] = parsed
-                            if not isinstance(merged_insights.get("taxonomy"), dict):
-                                print(
-                                    f"[WARNING] Merged insight has invalid taxonomy; skipping merged insight and keeping parents. "
-                                    f"taxonomy_type={type(taxo).__name__}"
-                                )
-                                library.add_insights([new_insight], iter)
-                                library.update_taxonomy(new_insight)
-                                print(f"Online merge skipped for task {new_insight['task_id']} due to invalid taxonomy. Adding original insight!")
-                                continue
-
-                        # Remove only the existing insights that were actually merged (not all taxonomy-matched candidates).
-                        library.replace_merged_insights([{"insight_id": pid} for pid in parent_ids])
-                        library.add_insights([merged_insights], iter)
-                        library.update_taxonomy(merged_insights)
-                    successful_merges += 1
-                    print(f"Successfully merged insight for task {new_insight['task_id']} with existing library insights (self-verify only)!")
-                else:
-                    with lock:
-                        library.add_insights([new_insight], iter)
-                        library.update_taxonomy(new_insight)
-                    print(f"Online merge failed for task {new_insight['task_id']}. Adding original insight!")
-
-                processed_count += 1
-                if processed_count % 10 == 0:
-                    try:
-                        _save_diagnosis_snapshot()
-                        print(f"[Iteration {iter}] Saved library snapshot after processing {processed_count} insights")
-                    except Exception as e:
-                        print(f"[Iteration {iter}] Warning: Failed to save snapshot: {e}")
-
-            pending = pending_task_results.pop(task_key(task_id), None)
-            if pending is not None:
-                _idx, task, result_payload = pending
-                _mark_task_completed(task, _idx, result_payload)
-
-            new_ins_queue.task_done()
+                    pending = pending_task_results.pop(task_key(task_id), None)
+                    if pending is not None:
+                        _idx, task, result_payload = pending
+                        _mark_task_completed(task, _idx, result_payload)
+        
+                        set_span_output(merge_span, {"processed_count": processed_count})
+                except Exception as exc:
+                    laminar_record_exception(merge_span, exc)
+                    add_span_tags(merge_span, ["experiment-error"])
+                    raise
+                finally:
+                    new_ins_queue.task_done()
 
     # Start the async processing thread
     processing_thread = threading.Thread(target=process_insights_queue, daemon=True)
@@ -785,7 +903,7 @@ def run_library_diagnosis(
         ):
             idx, task = futures[future]
             try:
-                new_insights, is_success, is_execution, is_verify, is_diagnosis = future.result()
+                new_insights, is_success, is_execution, is_verify, is_diagnosis, laminar_trace_id, span_context_payload = future.result()
             except Exception:
                 print(f"\n   [WARNING] Task {task.id}: diagnosis worker failed; recording task failure and continuing.\n")
                 import traceback
@@ -795,6 +913,8 @@ def run_library_diagnosis(
                 is_execution = False
                 is_verify = None
                 is_diagnosis = None
+                laminar_trace_id = None
+                span_context_payload = None
                 task.output_status.append("experiment_error")
                 task.retri_ins_lst.append([])
             result_payload = {
@@ -802,6 +922,7 @@ def run_library_diagnosis(
                 "is_execution": is_execution,
                 "is_verify": is_verify,
                 "is_diagnosis": is_diagnosis,
+                "laminar_trace_id": laminar_trace_id,
             }
 
             if is_execution is False:
@@ -819,7 +940,7 @@ def run_library_diagnosis(
             if new_insights:
                 with queue_lock:
                     pending_task_results[task_key(task.id)] = (idx, task, result_payload)
-                    new_ins_queue.put((task.id, new_insights))
+                    new_ins_queue.put((task.id, new_insights, span_context_payload))
                     print(f"Added new insights for task {task.id} to queue! Queue size: {new_ins_queue.qsize()}")
             else:
                 _mark_task_completed(task, idx, result_payload)

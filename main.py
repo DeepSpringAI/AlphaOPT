@@ -11,6 +11,7 @@ from src.config import (
     write_training_run_metadata,
 )
 from src.resume_state import default_training_state, load_json_state, now_timestamp, save_json_state
+from src.laminar_tracing import flush_laminar, init_laminar_from_env
 
 def main():
     #* Configure
@@ -49,6 +50,19 @@ def main():
     os.environ["ALPHAOPT_SEED_TAXONOMY_PATH"] = get_seed_taxonomy_path(config)
     OmegaConf.resolve(config)
     metadata_path = write_training_run_metadata(config, config_path=args.config)
+    init_laminar_from_env(
+        mode="training",
+        config_path=args.config,
+        metadata={
+            "dataset": str(config.dataset),
+            "output_folder": str(config.output_folder),
+            "library_subdir": str(config.library_subdir),
+            "base_model": str(config.base_model),
+            "advanced_model": str(config.advanced_model),
+            "base_service": str(config.base_service),
+            "advanced_service": str(config.advanced_service),
+        },
+    )
     resume_enabled = bool(getattr(config, "resume", True)) and not args.no_resume
     resume_state_path = str(Path(config.file_paths.train_output_dir) / "training_resume_state.json")
     resume_state = default_training_state(config_path=args.config, library_subdir=str(config.library_subdir))
@@ -280,6 +294,7 @@ def main():
     resume_state["current_phase"] = None
     resume_state["updated_at"] = now_timestamp()
     save_json_state(resume_state_path, resume_state)
+    flush_laminar()
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from functools import partial
 from .experience_library import Insight, ExperienceLibrary
 from .llm_retriever import LibraryRetrieval
 from .utils import save_log_data, call_llm_and_parse_with_retry, extract_json_array
+from .laminar_tracing import add_span_tags, record_exception as laminar_record_exception, set_span_attributes, set_span_output, trace_span
 from src.train_eval_utils import check_optimality
 from .dataloader import DataLoader, Task
 from .prompts.prompts_opt import PROMPT_GENERATE_FORMU, PROMPT_GENERATE_PROGRAM, PROMPT_INS_REWRITE, PROMPT_SELF_EXPLORE
@@ -86,29 +87,47 @@ class ProgramGenerator:
         
 
     def execute_code(self, code_str, timeout_sec=400):
-        try:
-            # Using subprocess to execute the code as a separate process
-            result = subprocess.run(
-                [sys.executable, "-u", "-"], 
-                input=code_str,
-                text=True, 
-                capture_output=True, 
-                check=True,
-                timeout=timeout_sec # Set the maximum run time
-            )
+        with trace_span(
+            "alphaopt.solver.execute",
+            input={"code_chars": len(code_str or ""), "timeout_sec": timeout_sec},
+            tags=["alphaopt", "solver"],
+            attributes={"alphaopt.solver.timeout_sec": timeout_sec, "alphaopt.code_chars": len(code_str or "")},
+        ) as span:
+            try:
+                # Using subprocess to execute the code as a separate process
+                result = subprocess.run(
+                    [sys.executable, "-u", "-"], 
+                    input=code_str,
+                    text=True, 
+                    capture_output=True, 
+                    check=True,
+                    timeout=timeout_sec # Set the maximum run time
+                )
 
-            # Extract Gurobi's objVal (optimal objective value) from stdout
-            output = result.stdout
-            match = re.search(r"Optimal value\s*[:=]\s*([0-9.+-eE]+)", output)
+                # Extract Gurobi's objVal (optimal objective value) from stdout
+                output = result.stdout
+                match = re.search(r"Optimal value\s*[:=]\s*([0-9.+-eE]+)", output)
 
-            if match:
-                solution = float(match.group(1))
-                return solution
-            else:
-                return output
-            
-        except subprocess.TimeoutExpired as err:
-            return err
+                if match:
+                    solution = float(match.group(1))
+                    set_span_attributes(span, {"alphaopt.solver.status": "optimal_value"})
+                    set_span_output(span, {"solution": solution})
+                    return solution
+                else:
+                    set_span_attributes(span, {"alphaopt.solver.status": "no_objective"})
+                    set_span_output(span, str(output)[:4000])
+                    return output
+                
+            except subprocess.TimeoutExpired as err:
+                add_span_tags(span, ["timeout"])
+                set_span_attributes(span, {"alphaopt.solver.status": "timeout"})
+                set_span_output(span, {"timeout_sec": timeout_sec})
+                return err
+            except Exception as err:
+                add_span_tags(span, ["run-error"])
+                set_span_attributes(span, {"alphaopt.solver.status": "run_error"})
+                laminar_record_exception(span, err)
+                raise
         
         
     def rewrite_insights(self, iter, task, retrieved_insights, verbose, save_data, output_path):

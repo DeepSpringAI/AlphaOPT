@@ -11,6 +11,15 @@ from src.experience_library import ExperienceLibrary
 from src.dataloader import DataLoader 
 from src.llm_retriever import LibraryRetrieval
 from src.llm_evolver import LibraryEvolution
+from src.laminar_tracing import (
+    add_span_tags,
+    current_trace_id,
+    record_exception as laminar_record_exception,
+    record_trace_index,
+    set_span_attributes,
+    set_span_output,
+    trace_span,
+)
 
 from src.prompts.prompts_evolve import PROMPT_INS_REFINEMENT
 
@@ -37,6 +46,70 @@ def run_library_refinement(
             2) Integrate into a refinement prompt, get K new conditions.
             3) Build K library variants and verify retrieval to choose the best.
         Returns a dict with final condition and distribution to be merged in the main thread.
+        """
+        with trace_span(
+            "alphaopt.training.refinement.insight",
+            input={"insight_id": getattr(ins, "insight_id", None), "condition": getattr(ins, "condition", None)},
+            tags=["alphaopt", "train", "refinement", f"iter-{iter}"],
+            metadata={
+                "mode": "training",
+                "phase": "refinement",
+                "insight_id": getattr(ins, "insight_id", None),
+                "iteration": iter,
+                "output_path": output_path,
+            },
+            attributes={
+                "alphaopt.mode": "training",
+                "alphaopt.phase": "refinement",
+                "alphaopt.insight_id": str(getattr(ins, "insight_id", "")),
+                "alphaopt.iteration": int(iter),
+            },
+        ) as root_span:
+          try:
+            res = _process_one_insight_impl(ins)
+            trace_id = current_trace_id()
+            status = "skipped" if not res else ("accepted" if res.get("refinement_accepted") else "not_accepted")
+            set_span_attributes(root_span, {"alphaopt.status": status, "alphaopt.laminar_trace_id": trace_id})
+            add_span_tags(root_span, [status])
+            set_span_output(root_span, res or {"status": status})
+            record_trace_index(
+                output_path,
+                {
+                    "mode": "training",
+                    "phase": "refinement",
+                    "task_id": "",
+                    "iteration": iter,
+                    "insight_id": getattr(ins, "insight_id", None),
+                    "trace_id": trace_id,
+                    "status": status,
+                    "artifact_path": output_path,
+                },
+            )
+            return res
+          except Exception as exc:
+            trace_id = current_trace_id()
+            laminar_record_exception(root_span, exc)
+            add_span_tags(root_span, ["experiment-error"])
+            set_span_attributes(root_span, {"alphaopt.status": "experiment_error", "alphaopt.laminar_trace_id": trace_id})
+            record_trace_index(
+                output_path,
+                {
+                    "mode": "training",
+                    "phase": "refinement",
+                    "task_id": "",
+                    "iteration": iter,
+                    "insight_id": getattr(ins, "insight_id", None),
+                    "trace_id": trace_id,
+                    "status": "experiment_error",
+                    "artifact_path": output_path,
+                },
+            )
+            raise
+
+    def _process_one_insight_impl(ins):
+        """
+        Process a single insight implementation. Wrapped by _process_one_insight
+        to provide one Laminar root trace per refinement candidate.
         """
 
         # Copy lists to avoid accidental in-place mutation on shared objects

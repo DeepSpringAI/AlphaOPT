@@ -10,6 +10,14 @@ from copy import deepcopy
 import threading
 from pathlib import Path
 from dotenv import load_dotenv
+from .laminar_tracing import (
+    add_span_tags,
+    llm_attributes,
+    record_exception as laminar_record_exception,
+    set_span_attributes,
+    set_span_output,
+    trace_span,
+)
 
 #* Configure
 from .config import load_train_config
@@ -301,6 +309,17 @@ def _estimate_cost(
     prompt_cost = (prompt_tokens / 1_000_000.0) * p_per_m
     completion_cost = (completion_tokens / 1_000_000.0) * c_per_m
     return prompt_cost + completion_cost
+
+
+def _estimate_cost_breakdown(
+    vendor: str,
+    model: str,
+    prompt_tokens: float | None,
+    completion_tokens: float | None,
+) -> tuple[float, float, float]:
+    input_cost = _estimate_cost(vendor, model, prompt_tokens, 0.0)
+    output_cost = _estimate_cost(vendor, model, 0.0, completion_tokens)
+    return input_cost, output_cost, input_cost + output_cost
 
 
 def get_token_usage() -> Dict[str, Dict[str, float]]:
@@ -917,7 +936,7 @@ def call_llm_and_parse_with_retry(
                 total_tokens = float(prompt_tokens or 0.0) + float(completion_tokens or 0.0)
 
             # Estimate cost from token usage
-            cost = _estimate_cost(vendor, model, prompt_tokens, completion_tokens)
+            input_cost, output_cost, cost = _estimate_cost_breakdown(vendor, model, prompt_tokens, completion_tokens)
             # If OpenRouter additionally provides usage.cost, you can choose to override or log separately
             if vendor == "openrouter" and usage is not None:
                 explicit_cost = getattr(usage, "cost", None)
@@ -927,6 +946,8 @@ def call_llm_and_parse_with_retry(
                     explicit_cost = float(explicit_cost)
                     if explicit_cost > 0.0:
                         cost = explicit_cost
+                        input_cost = 0.0
+                        output_cost = explicit_cost
 
             _record_usage(
                 vendor,
@@ -945,6 +966,8 @@ def call_llm_and_parse_with_retry(
                 "usage_completion_tokens": completion_tokens,
                 "usage_total_tokens": total_tokens,
                 "usage_cost_usd": cost,
+                "usage_input_cost_usd": input_cost,
+                "usage_output_cost_usd": output_cost,
                 "usage_estimated": usage_estimated,
             }
 
@@ -1001,7 +1024,7 @@ def call_llm_and_parse_with_retry(
                 usage_estimated = True
             if total_tok is None:
                 total_tok = float(prompt_tok or 0.0) + float(completion_tok or 0.0)
-            usage_cost = _estimate_cost("gemini", model, prompt_tok, completion_tok)
+            input_cost, output_cost, usage_cost = _estimate_cost_breakdown("gemini", model, prompt_tok, completion_tok)
             _record_usage(
                 "gemini",
                 prompt_tokens=prompt_tok,
@@ -1018,6 +1041,8 @@ def call_llm_and_parse_with_retry(
                 "usage_completion_tokens": completion_tok,
                 "usage_total_tokens": total_tok,
                 "usage_cost_usd": usage_cost,
+                "usage_input_cost_usd": input_cost,
+                "usage_output_cost_usd": output_cost,
                 "usage_estimated": usage_estimated,
             }
             return completion.text, call_meta
@@ -1036,82 +1061,138 @@ def call_llm_and_parse_with_retry(
         if log_header is not None:
             if verbose: print(log_header)
         try:
-            t0 = time.time()
-            if verbose: print(f"[Attempt {attempt}/{max_retry}]\n")
+            with trace_span(
+                "llm.call",
+                input=prompt,
+                span_type="LLM",
+                tags=["alphaopt", "llm", str(operation_name), str(vendor), str(model)],
+                metadata=base_trace_context,
+                attributes={
+                    "model_name": model,
+                    "service": str(service),
+                    "provider": vendor,
+                    "temperature": temperature,
+                    "attempt": attempt,
+                    "max_retry": max_retry,
+                    "operation": operation_name,
+                    "parser.name": parser_name,
+                    "prompt_sha256": prompt_sha,
+                    "prompt_chars": len(prompt_text),
+                    **base_trace_context,
+                },
+            ) as lmnr_span:
+                t0 = time.time()
+                if verbose: print(f"[Attempt {attempt}/{max_retry}]\n")
 
-            raw_text, call_meta = _send_request()
-            if verbose: 
-                print(raw_text)
-            resp_time = time.time() - t0
+                raw_text, call_meta = _send_request()
+                if verbose:
+                    print(raw_text)
+                resp_time = time.time() - t0
 
-            if verbose: print(f"Done in {resp_time:.2f}s")
+                if verbose: print(f"Done in {resp_time:.2f}s")
 
-            io_paths = None
-            if resolved_trace_output_path and _should_capture_io(on_error=False):
-                try:
-                    io_paths = _write_llm_io_artifacts(
-                        trace_output_path=resolved_trace_output_path,
-                        prompt_text=prompt_text,
-                        response_text=raw_text,
-                        meta={
-                            "attempt": attempt,
-                            **base_trace_context,
-                            "operation": operation_name,
-                        },
-                    )
-                except Exception as io_err:
-                    print(f"\n[Tracing warning] failed to persist LLM I/O artifacts: {io_err}")
-
-            result = parse_fn(raw_text)
-            if resolved_trace_output_path and _should_write_span(ok=True):
-                try:
-                    _write_otlp_friendly_span(
-                        trace_output_path=resolved_trace_output_path,
-                        span_name="llm.call",
-                        trace_id=call_trace_id,
-                        span_id=span_id,
-                        parent_span_id=None,
-                        start_ns=attempt_start_ns,
-                        end_ns=time.time_ns(),
-                        ok=True,
-                        attributes={
-                            "model_name": model,
-                            "service": str(service),
-                            "provider": vendor,
-                            "llm.provider": call_meta.get("provider"),
-                            "llm.request.model": call_meta.get("request_model"),
-                            "llm.response.model": call_meta.get("response_model"),
-                            "llm.request.id": call_meta.get("request_id"),
-                            "temperature": temperature,
-                            "attempt": attempt,
-                            "max_retry": max_retry,
-                            "operation": operation_name,
-                            "parser.name": parser_name,
+                set_span_output(lmnr_span, raw_text)
+                set_span_attributes(
+                    lmnr_span,
+                    llm_attributes(
+                        provider=vendor,
+                        request_model=model,
+                        response_model=call_meta.get("response_model"),
+                        request_id=call_meta.get("request_id"),
+                        prompt_tokens=call_meta.get("usage_prompt_tokens"),
+                        completion_tokens=call_meta.get("usage_completion_tokens"),
+                        total_tokens=call_meta.get("usage_total_tokens"),
+                        cost=call_meta.get("usage_cost_usd"),
+                        input_cost=call_meta.get("usage_input_cost_usd"),
+                        output_cost=call_meta.get("usage_output_cost_usd"),
+                        extra={
                             "latency_ms": round(resp_time * 1000.0, 3),
-                            "level": "DEFAULT",
-                            "status_message": "ok",
-                            "prompt_sha256": prompt_sha,
-                            "prompt_chars": len(prompt_text),
                             "response_chars": len(raw_text or ""),
-                            "usage.prompt_tokens": call_meta.get("usage_prompt_tokens"),
-                            "usage.completion_tokens": call_meta.get("usage_completion_tokens"),
-                            "usage.total_tokens": call_meta.get("usage_total_tokens"),
-                            "usage.cost_usd": call_meta.get("usage_cost_usd"),
                             "usage.estimated": call_meta.get("usage_estimated"),
-                            "observation.model": call_meta.get("response_model") or model,
-                            "observation.input_id": (io_paths or {}).get("prompt_id"),
-                            "observation.output_id": (io_paths or {}).get("response_id"),
-                            "prompt_id": (io_paths or {}).get("prompt_id"),
-                            "response_id": (io_paths or {}).get("response_id"),
-                            **base_trace_context,
+                            "status_message": "ok",
                         },
-                        events=[],
-                    )
-                except Exception as span_err:
-                    print(f"\n[Tracing warning] failed to persist OTLP span: {span_err}")
-            return result
+                    ),
+                )
+
+                io_paths = None
+                if resolved_trace_output_path and _should_capture_io(on_error=False):
+                    try:
+                        io_paths = _write_llm_io_artifacts(
+                            trace_output_path=resolved_trace_output_path,
+                            prompt_text=prompt_text,
+                            response_text=raw_text,
+                            meta={
+                                "attempt": attempt,
+                                **base_trace_context,
+                                "operation": operation_name,
+                            },
+                        )
+                    except Exception as io_err:
+                        print(f"\n[Tracing warning] failed to persist LLM I/O artifacts: {io_err}")
+
+                result = parse_fn(raw_text)
+                if resolved_trace_output_path and _should_write_span(ok=True):
+                    try:
+                        _write_otlp_friendly_span(
+                            trace_output_path=resolved_trace_output_path,
+                            span_name="llm.call",
+                            trace_id=call_trace_id,
+                            span_id=span_id,
+                            parent_span_id=None,
+                            start_ns=attempt_start_ns,
+                            end_ns=time.time_ns(),
+                            ok=True,
+                            attributes={
+                                "model_name": model,
+                                "service": str(service),
+                                "provider": vendor,
+                                "llm.provider": call_meta.get("provider"),
+                                "llm.request.model": call_meta.get("request_model"),
+                                "llm.response.model": call_meta.get("response_model"),
+                                "llm.request.id": call_meta.get("request_id"),
+                                "temperature": temperature,
+                                "attempt": attempt,
+                                "max_retry": max_retry,
+                                "operation": operation_name,
+                                "parser.name": parser_name,
+                                "latency_ms": round(resp_time * 1000.0, 3),
+                                "level": "DEFAULT",
+                                "status_message": "ok",
+                                "prompt_sha256": prompt_sha,
+                                "prompt_chars": len(prompt_text),
+                                "response_chars": len(raw_text or ""),
+                                "usage.prompt_tokens": call_meta.get("usage_prompt_tokens"),
+                                "usage.completion_tokens": call_meta.get("usage_completion_tokens"),
+                                "usage.total_tokens": call_meta.get("usage_total_tokens"),
+                                "usage.cost_usd": call_meta.get("usage_cost_usd"),
+                                "usage.estimated": call_meta.get("usage_estimated"),
+                                "observation.model": call_meta.get("response_model") or model,
+                                "observation.input_id": (io_paths or {}).get("prompt_id"),
+                                "observation.output_id": (io_paths or {}).get("response_id"),
+                                "prompt_id": (io_paths or {}).get("prompt_id"),
+                                "response_id": (io_paths or {}).get("response_id"),
+                                **base_trace_context,
+                            },
+                            events=[],
+                        )
+                    except Exception as span_err:
+                        print(f"\n[Tracing warning] failed to persist OTLP span: {span_err}")
+                add_span_tags(lmnr_span, ["ok"])
+                return result
 
         except Exception as err:
+            try:
+                laminar_record_exception(lmnr_span if "lmnr_span" in locals() else None, err)
+                set_span_attributes(
+                    lmnr_span if "lmnr_span" in locals() else None,
+                    {
+                        "status_message": "error",
+                        "error_type": _classify_llm_error(err).get("kind"),
+                    },
+                )
+                add_span_tags(lmnr_span if "lmnr_span" in locals() else None, ["error"])
+            except Exception:
+                pass
             err_info = _classify_llm_error(err)
             trace_files: dict | None = None
             span_path = None

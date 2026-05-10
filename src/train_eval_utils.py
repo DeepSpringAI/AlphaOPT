@@ -13,6 +13,7 @@ from src.utils import cal_time_cost
 from src.dataloader import DataLoader, Task          
 from src.experience_library import ExperienceLibrary
 from src.llm_retriever import LibraryRetrieval
+from src.laminar_tracing import add_span_tags, set_span_attributes, set_span_output, trace_span
 from .utils import call_llm_and_parse_with_retry
 import copy
 
@@ -42,43 +43,83 @@ def generate_solution_with_retrieval(
     Returns:
         candidate_formulation, program_output, runnable, is_time_out, retrieved_ins_ids
     """
-    formulation_ins, program_ins = divide_insight(retrieved_insights)
+    task_id = getattr(task, "id", None)
+    with trace_span(
+        "alphaopt.solution.generate",
+        input={"task_id": task_id, "iteration": iter, "seed_insights": len(retrieved_insights or [])},
+        tags=["alphaopt", "solution-generation"],
+        metadata={"phase": "solution_generation", "task_id": task_id, "iteration": iter},
+        attributes={"alphaopt.task_id": str(task_id), "alphaopt.iteration": int(iter) if iter is not None else -1},
+    ) as span:
+        formulation_ins, program_ins = divide_insight(retrieved_insights)
 
-    if not formulation_ins and any(key in ins.taxonomy for ins in library for key in ("General Formulation", "Domain Modeling")):
-        # print(f"Retrieving formulation insights for Task {task.id}!")
-        formulation_ins = llm_retri.retrieve_applicable_insights(
-            iter=iter, task=task, stage="Formulation", config=config,
-            verbose=verbose, save_data=save_data, output_path=output_path
+        if not formulation_ins and any(key in ins.taxonomy for ins in library for key in ("General Formulation", "Domain Modeling")):
+            with trace_span(
+                "alphaopt.retrieval.formulation",
+                input={"task_id": task_id, "stage": "Formulation"},
+                tags=["alphaopt", "retrieval", "formulation"],
+                attributes={"alphaopt.task_id": str(task_id), "alphaopt.retrieval.stage": "Formulation"},
+            ) as retr_span:
+                formulation_ins = llm_retri.retrieve_applicable_insights(
+                    iter=iter, task=task, stage="Formulation", config=config,
+                    verbose=verbose, save_data=save_data, output_path=output_path
+                )
+                set_span_output(retr_span, {"retrieved_count": len(formulation_ins or [])})
+
+        with trace_span(
+            "alphaopt.formulation.generate",
+            input={"task_id": task_id, "retrieved_count": len(formulation_ins or [])},
+            tags=["alphaopt", "formulation"],
+            attributes={"alphaopt.task_id": str(task_id), "alphaopt.retrieved_count": len(formulation_ins or [])},
+        ) as form_span:
+            candidate_formulation = llm_opt.generate_formulation(
+                iter=iter, task=task, retrieved_insights=formulation_ins, abl_params=config.ablation,
+                verbose=verbose, save_data=save_data, output_path=output_path
+            )
+            set_span_output(form_span, {"generated": bool(candidate_formulation)})
+
+        if not candidate_formulation:
+            add_span_tags(span, ["parse-error"])
+            set_span_output(span, {"generated": False})
+            return None, None, None, None, None, None
+
+        if not program_ins and any("Code Implementation" in ins.taxonomy for ins in library):
+            with trace_span(
+                "alphaopt.retrieval.program",
+                input={"task_id": task_id, "stage": "Program"},
+                tags=["alphaopt", "retrieval", "program"],
+                attributes={"alphaopt.task_id": str(task_id), "alphaopt.retrieval.stage": "Program"},
+            ) as retr_span:
+                program_ins = llm_retri.retrieve_applicable_insights(
+                    iter=iter, task=task, stage="Program", formulation=candidate_formulation, config=config,
+                    verbose=verbose, save_data=save_data, output_path=output_path
+                )
+                set_span_output(retr_span, {"retrieved_count": len(program_ins or [])})
+
+        with trace_span(
+            "alphaopt.program.generate",
+            input={"task_id": task_id, "retrieved_count": len(program_ins or [])},
+            tags=["alphaopt", "program"],
+            attributes={"alphaopt.task_id": str(task_id), "alphaopt.retrieved_count": len(program_ins or [])},
+        ) as prog_span:
+            candidate_program, output, runnable, is_time_out = llm_opt.generate_program(
+                iter=iter, task=task, retrieved_insights=program_ins, formulation=candidate_formulation, abl_params=config.ablation,
+                verbose=verbose, save_data=save_data, output_path=output_path
+            )
+            set_span_output(prog_span, {"generated": bool(candidate_program), "runnable": bool(runnable), "timeout": bool(is_time_out)})
+
+        prev_insights = formulation_ins + program_ins
+        set_span_attributes(
+            span,
+            {
+                "alphaopt.formulation_insights": len(formulation_ins or []),
+                "alphaopt.program_insights": len(program_ins or []),
+                "alphaopt.runnable": bool(runnable),
+                "alphaopt.timeout": bool(is_time_out),
+            },
         )
-        # print(f"Retrieved {len(formulation_ins)} formulation insights for Task {task.id}!")
-
-    # Generate mathematical formulation
-    candidate_formulation = llm_opt.generate_formulation(
-        iter=iter, task=task, retrieved_insights=formulation_ins, abl_params=config.ablation,
-        verbose=verbose, save_data=save_data, output_path=output_path
-    )
-
-    if not candidate_formulation:
-        return None, None, None, None, None, None
-
-    # Retrieve insights for program generation
-    if not program_ins and any("Code Implementation" in ins.taxonomy for ins in library):
-        # print(f"Retrieving program insights for Task {task.id}!")
-        program_ins = llm_retri.retrieve_applicable_insights(
-            iter=iter, task=task, stage="Program", formulation=candidate_formulation, config=config,
-            verbose=verbose, save_data=save_data, output_path=output_path
-        )
-        # print(f"Retrieved {len(program_ins)} program insights for Task {task.id}!")
-
-    # Generate solver program
-    candidate_program, output, runnable, is_time_out = llm_opt.generate_program(
-        iter=iter, task=task, retrieved_insights=program_ins, formulation=candidate_formulation, abl_params=config.ablation,
-        verbose=verbose, save_data=save_data, output_path=output_path
-    )
-
-    prev_insights = formulation_ins + program_ins
-
-    return prev_insights, candidate_formulation, candidate_program, output, runnable, is_time_out
+        set_span_output(span, {"runnable": bool(runnable), "timeout": bool(is_time_out), "output": str(output)[:1000]})
+        return prev_insights, candidate_formulation, candidate_program, output, runnable, is_time_out
 
 
 def is_optimal_with_tolerance(output, gt, tol=config.params.tolerance, mode="absolute"):
@@ -106,29 +147,40 @@ def check_optimality(task, output, runnable, is_time_out):
         - feedback   : hints for code correction or debugging
     """
 
-    # Accept broader numeric types (e.g., int, numpy scalars) to avoid misclassifying optimal outputs.
-    # Exclude bool (a subclass of int) explicitly.
-    if isinstance(output, numbers.Real) and not isinstance(output, bool):
-        output = float(output)
-        if is_optimal_with_tolerance(output=output, gt=task.ground_truth):
-            return True, "optimal", None
-        else:
-            # Non-optimal results
+    with trace_span(
+        "alphaopt.optimality_check",
+        input={"task_id": getattr(task, "id", None), "output": output, "runnable": runnable, "timeout": is_time_out},
+        tags=["alphaopt", "optimality-check"],
+        attributes={"alphaopt.task_id": str(getattr(task, "id", "")), "alphaopt.runnable": bool(runnable), "alphaopt.timeout": bool(is_time_out)},
+    ) as span:
+        def _finish(is_optimal, status, feedback):
+            set_span_attributes(span, {"alphaopt.status": status, "alphaopt.is_optimal": bool(is_optimal)})
+            add_span_tags(span, [status])
+            set_span_output(span, {"is_optimal": bool(is_optimal), "status": status, "feedback": feedback})
+            return is_optimal, status, feedback
+
+        # Accept broader numeric types (e.g., int, numpy scalars) to avoid misclassifying optimal outputs.
+        # Exclude bool (a subclass of int) explicitly.
+        if isinstance(output, numbers.Real) and not isinstance(output, bool):
+            output = float(output)
+            if is_optimal_with_tolerance(output=output, gt=task.ground_truth):
+                return _finish(True, "optimal", None)
+
             feedback = f"\n   [Task {task.id}]: Output was not optimal: {output}. Expected optimal value: {task.ground_truth}"
-            return False, "not_optimal", feedback
+            return _finish(False, "not_optimal", feedback)
 
-    # No numeric objective returned
-    if runnable:    
-        if is_time_out:
-            feedback = f"\n   [Task {task.id}]: Solver timed out without finding an optimal solution: \n{output}"
-            return False, "solver_time_out", feedback
+        # No numeric objective returned
+        if runnable:
+            if is_time_out:
+                feedback = f"\n   [Task {task.id}]: Solver timed out without finding an optimal solution: \n{output}"
+                return _finish(False, "solver_time_out", feedback)
 
-        feedback = f"\n   [Task {task.id}]: Failed to obtain an objective value: \n{output}"
-        return False, "failure_solve", feedback
+            feedback = f"\n   [Task {task.id}]: Failed to obtain an objective value: \n{output}"
+            return _finish(False, "failure_solve", feedback)
 
-    # Program not runnable
-    feedback = f"\n   [Task {task.id}]: Failed to generate a runnable program: \n{output}"
-    return False, "run_error", feedback
+        # Program not runnable
+        feedback = f"\n   [Task {task.id}]: Failed to generate a runnable program: \n{output}"
+        return _finish(False, "run_error", feedback)
 
 
 # Verification function to check if newly added insights can be correctly retrieved

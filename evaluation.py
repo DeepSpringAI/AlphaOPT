@@ -24,6 +24,17 @@ from src.resume_state import (
     save_json_state,
     task_key,
 )
+from src.laminar_tracing import (
+    add_span_tags,
+    current_trace_id,
+    flush_laminar,
+    init_laminar_from_env,
+    record_exception as laminar_record_exception,
+    record_trace_index,
+    set_span_attributes,
+    set_span_output,
+    trace_span,
+)
 
 def evaluate(
     tasks: List["Task"],
@@ -98,112 +109,210 @@ def evaluate(
         """
         Process a single task with multiple attempts for pass@k evaluation
         """
+        task_trace_id = None
         output_path = f"{output_dirs}/nolib"
         retrieved_ins_ids = []
         formulation_ins, program_ins = [], []
-
-        if use_library:
-            # Retrieve relevant insights from an archived experience library
-            output_path = f"{output_dirs}/lib"
-            formulation_ins = llm_retri.retrieve_applicable_insights(
-                    task=task,
-                    stage="Formulation",
-                    config=config,
-                    verbose=False,
-                    save_data=True,
-                    output_path=output_path
-                    )
-            retrieved_ins_ids = [ins["insight_id"] for ins in formulation_ins if 'insight_id' in ins]
-
-        # Try multiple times for pass@k evaluation
-        attempts_results = []
-        attempt_records = []
-        for attempt in range(pass_at_k):
-            attempt_output_path = f"{output_path}_attempt_{attempt + 1}" if pass_at_k > 1 else output_path
-            
-            candidate_model = llm_opt.generate_formulation(
-                    task=task,
-                    retrieved_insights=formulation_ins,
-                    # rewrite=bool(config.ablation.rewrite),
-                    abl_params=config.ablation,
-                    verbose=False,
-                    save_data=True,
-                    output_path=attempt_output_path
-                )
-            
-            if use_library and config.ablation.include_program_insight:
-                program_ins = llm_retri.retrieve_applicable_insights(
-                        task=task,
-                        stage="Program",
-                        config=config,
-                        formulation=candidate_model,
-                        verbose=False,
-                        save_data=True,
-                        output_path=attempt_output_path
-                    )
-                
-                retrieved_ins_ids.extend([ins["insight_id"] for ins in program_ins if "insight_id" in ins])
-
-            candidate_program, output, runnable, is_time_out = llm_opt.generate_program(
-                    task=task,
-                    retrieved_insights=program_ins,
-                    formulation=candidate_model,
-                    abl_params=config.ablation,
-                    verbose=False,
-                    save_data=True,
-                    output_path=attempt_output_path
-                )
-
-            # Check optimality
-            is_optimal, status, feedback = check_optimality(task=task, output=output, runnable=runnable, is_time_out=is_time_out)
-            
-            # Self-Debug
-            if config.ablation.max_debug_retry:
-                if status == "run_error":
-                    is_optimal, runnable = self_debug(task, candidate_program, feedback, config)
-
-            attempts_results.append((int(is_optimal), int(runnable), status))
-            attempt_records.append(
-                {
-                    "attempt": attempt + 1,
-                    "status": status,
-                    "is_optimal": bool(is_optimal),
-                    "runnable": bool(runnable),
-                    "is_time_out": bool(is_time_out) if is_time_out is not None else None,
-                    "output": str(output)[:2000],
-                    "formulation_path": f"{attempt_output_path}/model_iter_None.txt",
-                    "program_path": f"{attempt_output_path}/program_iter_None.py",
-                    "output_path": f"{attempt_output_path}/output_iter_None.txt",
-                }
-            )
-            
-            # If we found a successful solution, we can stop early for pass@k
-            if is_optimal:
-                break
-
-        if not attempts_results:
-            attempts_results.append((0, 0, "no_attempts"))
-            attempt_records.append({"attempt": 0, "status": "no_attempts", "is_optimal": False, "runnable": False})
-
-        # Record task (use the first attempt's results for recording)
-        task.retri_ins_lst.append(retrieved_ins_ids)
-        task.output_status.append(attempts_results[0][2])  # Use first attempt's status
-
-        # Calculate pass@k results
-        pass_at_k_success = any(result[0] for result in attempts_results)  # Any attempt succeeded
-        pass_at_k_runnable = any(result[1] for result in attempts_results)  # Any attempt was runnable
-        
-        return (
-            int(attempts_results[0][0]),
-            int(attempts_results[0][1]),
-            int(pass_at_k_success),
-            int(pass_at_k_runnable),
-            {
-                "retrieved_insight_ids": retrieved_ins_ids,
-                "attempts": attempt_records,
-                "first_status": attempts_results[0][2],
+        with trace_span(
+            "alphaopt.evaluation.task",
+            input={"task_id": task.id, "description": task.desc, "ground_truth": task.ground_truth},
+            tags=[
+                "alphaopt",
+                "eval",
+                str(dataset),
+                str(llm_opt.model),
+                "with-library" if use_library else "no-library",
+            ],
+            metadata={
+                "mode": "evaluation",
+                "phase": "evaluation",
+                "dataset": dataset,
+                "task_id": task.id,
+                "run_idx": run_idx,
+                "output_folder": output_folder,
+                "model": llm_opt.model,
+                "service": config.service,
+                "library_path": getattr(config, "library_path", None),
+                "taxonomy_path": getattr(config, "taxonomy_path", None),
+                "resume_enabled": bool(getattr(config, "resume", True)),
             },
-        )
+            attributes={
+                "alphaopt.mode": "evaluation",
+                "alphaopt.phase": "evaluation",
+                "alphaopt.dataset": dataset,
+                "alphaopt.task_id": str(task.id),
+                "alphaopt.run_idx": int(run_idx),
+                "alphaopt.use_library": bool(use_library),
+            },
+        ) as root_span:
+            try:
+                task_trace_id = current_trace_id()
+                if use_library:
+                    # Retrieve relevant insights from an archived experience library
+                    output_path = f"{output_dirs}/lib"
+                    with trace_span(
+                        "alphaopt.retrieval.formulation",
+                        input={"task_id": task.id, "stage": "Formulation"},
+                        tags=["alphaopt", "retrieval", "formulation"],
+                        attributes={"alphaopt.task_id": str(task.id), "alphaopt.retrieval.stage": "Formulation"},
+                    ) as retr_span:
+                        formulation_ins = llm_retri.retrieve_applicable_insights(
+                            task=task,
+                            stage="Formulation",
+                            config=config,
+                            verbose=False,
+                            save_data=True,
+                            output_path=output_path
+                            )
+                        set_span_output(retr_span, {"retrieved_count": len(formulation_ins or [])})
+                    retrieved_ins_ids = [ins["insight_id"] for ins in formulation_ins if 'insight_id' in ins]
+
+                # Try multiple times for pass@k evaluation
+                attempts_results = []
+                attempt_records = []
+                for attempt in range(pass_at_k):
+                    attempt_output_path = f"{output_path}_attempt_{attempt + 1}" if pass_at_k > 1 else output_path
+                    
+                    with trace_span(
+                        "alphaopt.formulation.generate",
+                        input={"task_id": task.id, "attempt": attempt + 1, "retrieved_count": len(formulation_ins or [])},
+                        tags=["alphaopt", "formulation"],
+                        attributes={"alphaopt.task_id": str(task.id), "alphaopt.attempt": attempt + 1},
+                    ) as form_span:
+                        candidate_model = llm_opt.generate_formulation(
+                            task=task,
+                            retrieved_insights=formulation_ins,
+                            # rewrite=bool(config.ablation.rewrite),
+                            abl_params=config.ablation,
+                            verbose=False,
+                            save_data=True,
+                            output_path=attempt_output_path
+                        )
+                        set_span_output(form_span, {"generated": bool(candidate_model)})
+                    
+                    if use_library and config.ablation.include_program_insight:
+                        with trace_span(
+                            "alphaopt.retrieval.program",
+                            input={"task_id": task.id, "attempt": attempt + 1, "stage": "Program"},
+                            tags=["alphaopt", "retrieval", "program"],
+                            attributes={"alphaopt.task_id": str(task.id), "alphaopt.attempt": attempt + 1, "alphaopt.retrieval.stage": "Program"},
+                        ) as retr_span:
+                            program_ins = llm_retri.retrieve_applicable_insights(
+                                task=task,
+                                stage="Program",
+                                config=config,
+                                formulation=candidate_model,
+                                verbose=False,
+                                save_data=True,
+                                output_path=attempt_output_path
+                            )
+                            set_span_output(retr_span, {"retrieved_count": len(program_ins or [])})
+                        
+                        retrieved_ins_ids.extend([ins["insight_id"] for ins in program_ins if "insight_id" in ins])
+
+                    with trace_span(
+                        "alphaopt.program.generate",
+                        input={"task_id": task.id, "attempt": attempt + 1, "retrieved_count": len(program_ins or [])},
+                        tags=["alphaopt", "program"],
+                        attributes={"alphaopt.task_id": str(task.id), "alphaopt.attempt": attempt + 1},
+                    ) as prog_span:
+                        candidate_program, output, runnable, is_time_out = llm_opt.generate_program(
+                            task=task,
+                            retrieved_insights=program_ins,
+                            formulation=candidate_model,
+                            abl_params=config.ablation,
+                            verbose=False,
+                            save_data=True,
+                            output_path=attempt_output_path
+                        )
+                        set_span_output(prog_span, {"generated": bool(candidate_program), "runnable": bool(runnable), "timeout": bool(is_time_out)})
+
+                    # Check optimality
+                    is_optimal, status, feedback = check_optimality(task=task, output=output, runnable=runnable, is_time_out=is_time_out)
+                    
+                    # Self-Debug
+                    if config.ablation.max_debug_retry:
+                        if status == "run_error":
+                            is_optimal, runnable = self_debug(task, candidate_program, feedback, config)
+
+                    attempts_results.append((int(is_optimal), int(runnable), status))
+                    attempt_records.append(
+                        {
+                            "attempt": attempt + 1,
+                            "status": status,
+                            "is_optimal": bool(is_optimal),
+                            "runnable": bool(runnable),
+                            "is_time_out": bool(is_time_out) if is_time_out is not None else None,
+                            "output": str(output)[:2000],
+                            "formulation_path": f"{attempt_output_path}/model_iter_None.txt",
+                            "program_path": f"{attempt_output_path}/program_iter_None.py",
+                            "output_path": f"{attempt_output_path}/output_iter_None.txt",
+                        }
+                    )
+                    
+                    # If we found a successful solution, we can stop early for pass@k
+                    if is_optimal:
+                        break
+
+                if not attempts_results:
+                    attempts_results.append((0, 0, "no_attempts"))
+                    attempt_records.append({"attempt": 0, "status": "no_attempts", "is_optimal": False, "runnable": False})
+
+                # Record task (use the first attempt's results for recording)
+                task.retri_ins_lst.append(retrieved_ins_ids)
+                task.output_status.append(attempts_results[0][2])  # Use first attempt's status
+
+                # Calculate pass@k results
+                pass_at_k_success = any(result[0] for result in attempts_results)  # Any attempt succeeded
+                pass_at_k_runnable = any(result[1] for result in attempts_results)  # Any attempt was runnable
+                final_status = attempts_results[0][2]
+                set_span_attributes(root_span, {"alphaopt.status": final_status, "alphaopt.laminar_trace_id": task_trace_id})
+                add_span_tags(root_span, [final_status, "optimal" if pass_at_k_success else "not-optimal"])
+                trace_payload = {
+                    "retrieved_insight_ids": retrieved_ins_ids,
+                    "attempts": attempt_records,
+                    "first_status": final_status,
+                    "laminar_trace_id": task_trace_id,
+                }
+                set_span_output(root_span, trace_payload)
+                record_trace_index(
+                    f"./testing/{output_folder}",
+                    {
+                        "mode": "evaluation",
+                        "phase": "evaluation",
+                        "dataset": dataset,
+                        "task_id": task.id,
+                        "run_idx": run_idx,
+                        "trace_id": task_trace_id,
+                        "status": final_status,
+                        "artifact_path": output_dirs,
+                    },
+                )
+                return (
+                    int(attempts_results[0][0]),
+                    int(attempts_results[0][1]),
+                    int(pass_at_k_success),
+                    int(pass_at_k_runnable),
+                    trace_payload,
+                )
+            except Exception as exc:
+                laminar_record_exception(root_span, exc)
+                add_span_tags(root_span, ["experiment-error"])
+                set_span_attributes(root_span, {"alphaopt.status": "experiment_error", "alphaopt.laminar_trace_id": task_trace_id})
+                record_trace_index(
+                    f"./testing/{output_folder}",
+                    {
+                        "mode": "evaluation",
+                        "phase": "evaluation",
+                        "dataset": dataset,
+                        "task_id": task.id,
+                        "run_idx": run_idx,
+                        "trace_id": task_trace_id,
+                        "status": "experiment_error",
+                        "artifact_path": output_dirs,
+                    },
+                )
+                raise
 
     def _restore_task_progress(task: "Task", record: dict[str, Any]) -> None:
         task.output_status = record.get("output_status", [])
@@ -698,6 +807,7 @@ def main() -> None:
     if args.no_resume:
         config.resume = False
     print(f"Evaluation config: {Path(args.config).resolve()}")
+    init_laminar_from_env(mode="evaluation", config_path=args.config)
 
     # Get datasets list - support both single string and list
     # Check for 'datasets' first, then fall back to 'dataset' for backward compatibility
@@ -938,6 +1048,7 @@ def main() -> None:
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(time.time())),
             }
         )
+    flush_laminar()
 
 
 if __name__ == "__main__":
