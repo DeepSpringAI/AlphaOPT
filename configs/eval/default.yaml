@@ -6,6 +6,7 @@ taxonomy_path: ./data/experience_library/default/latest_taxonomy_new.json
 output_folder_template: ${dataset}_eval
 model: gpt-5 
 service: http://127.0.0.1:4010/v1 # null
+reasoning_effort: medium # OpenAI-compatible services only; set null/off to omit
 n_runs: 3
 temperature: 0.0
 pass_at_k: 1

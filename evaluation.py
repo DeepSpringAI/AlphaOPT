@@ -10,6 +10,7 @@ from tqdm.auto import tqdm
 
 import concurrent.futures
 
+from src import utils as alphaopt_utils
 from src.utils import cal_time_cost, get_token_usage
 from src.dataloader import DataLoader, Task          
 from src.llm_programmer import ProgramGenerator
@@ -557,6 +558,8 @@ def evaluate_single_dataset(config: Any, dataset: str) -> dict:
         library = None
 
     # Initialize ProgramGenerator
+    reasoning_effort = getattr(dataset_config, "reasoning_effort", "medium")
+    alphaopt_utils.config.reasoning_effort = reasoning_effort
     llm_opt = ProgramGenerator(
         model       = dataset_config.model,
         service     = dataset_config.service,
@@ -690,6 +693,7 @@ def evaluate_single_dataset(config: Any, dataset: str) -> dict:
                 "model": dataset_config.model,
                 "service": dataset_config.service,
                 "temperature": dataset_config.temperature,
+                "reasoning_effort": reasoning_effort,
                 "pass_at_k": pass_at_k,
                 "n_runs": n_runs,
                 "ablation_tag": ablation_tag or "base",
@@ -748,6 +752,7 @@ def evaluate_single_dataset(config: Any, dataset: str) -> dict:
             "model": dataset_config.model,
             "service": dataset_config.service,
             "temperature": dataset_config.temperature,
+            "reasoning_effort": reasoning_effort,
             "pass_at_k": pass_at_k,
             "n_runs": n_runs,
             "aggregate": True,
@@ -777,6 +782,7 @@ def evaluate_single_dataset(config: Any, dataset: str) -> dict:
         "model": dataset_config.model,
         "service": dataset_config.service,
         "temperature": dataset_config.temperature,
+        "reasoning_effort": reasoning_effort,
         "pass_at_k": pass_at_k,
         "n_runs": n_runs,
         "ablation_tag": ablation_tag or "base",

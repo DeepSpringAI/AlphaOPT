@@ -13,6 +13,9 @@
 
 Keep new configs here with short descriptive filenames.
 
+OpenAI-compatible configs can set `reasoning_effort` (`medium` by default).
+Use `null`, `off`, or another empty/null-like value to omit the request field.
+
 Training writes experience-library artifacts into a subdirectory named after the train config:
 
 - `configs/train/default.yaml` writes to `data/experience_library/default/`

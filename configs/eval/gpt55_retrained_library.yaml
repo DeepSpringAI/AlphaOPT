@@ -7,6 +7,7 @@ taxonomy_path: ./data/experience_library/gpt55_gurobi_train_data_all_452/latest_
 output_folder_template: ${dataset}_eval_gpt55_e2_retrained
 model: gpt-5.5
 service: http://127.0.0.1:4010/v1
+reasoning_effort: medium # OpenAI-compatible services only; set null/off to omit
 
 n_runs: 3
 temperature: 0.0

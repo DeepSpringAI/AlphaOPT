@@ -2,6 +2,7 @@ base_model: google/gemini-2.5-flash
 advanced_model: google/gemini-2.5-flash
 base_service: openrouter # null for direct API calls
 advanced_service: openrouter
+reasoning_effort: medium # OpenAI-compatible services only; set null/off to omit
 verbose: false
 start_iter: 0
 data_slice: 

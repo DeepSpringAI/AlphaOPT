@@ -68,6 +68,7 @@ _TRACE_SESSION_DIR: Path | None = None
 _TRACE_SESSION_RUN_ID: str | None = None
 _EXPERIMENT_META_LOCK = threading.Lock()
 _EXPERIMENT_META_CACHE: dict | None = None
+DEFAULT_REASONING_EFFORT = "medium"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -86,6 +87,31 @@ def _env_int(name: str, default: int, min_value: int = 0) -> int:
     except Exception:
         return default
     return max(min_value, val)
+
+
+def _normalize_reasoning_effort(value: Any) -> str | None:
+    """
+    Normalize optional OpenAI-compatible reasoning effort config.
+
+    Empty/null-like values disable sending the field. Non-empty strings are passed
+    through so local proxies can support provider-specific effort names.
+    """
+    if value is None:
+        return None
+    effort = str(value).strip()
+    if not effort or effort.lower() in {"none", "null", "false", "off", "disabled"}:
+        return None
+    return effort
+
+
+def _resolve_reasoning_effort(explicit_reasoning_effort: Any = None) -> str | None:
+    if explicit_reasoning_effort is not None:
+        return _normalize_reasoning_effort(explicit_reasoning_effort)
+    return _normalize_reasoning_effort(getattr(config, "reasoning_effort", DEFAULT_REASONING_EFFORT))
+
+
+def _supports_reasoning_effort(vendor: str, model: str) -> bool:
+    return vendor in ("openai", "openrouter") and "gpt" in str(model or "").lower()
 
 
 def _env_float(name: str, default: float, min_value: float = 0.0, max_value: float = 1.0) -> float:
@@ -646,6 +672,7 @@ def _collect_config_meta(path: str, prefix: str) -> dict:
         "taxonomy_path": "taxonomy_path",
         "n_runs": "n_runs",
         "temperature": "temperature",
+        "reasoning_effort": "reasoning_effort",
         "pass_at_k": "pass_at_k",
         "start_iter": "start_iter",
     }
@@ -870,6 +897,7 @@ def call_llm_and_parse_with_retry(
     prompt: str | None = None,
     parse_fn: Callable[..., Any] = None,
     temperature: float = 0.7,        # sampling temperature
+    reasoning_effort: str | None = None,
     max_retry: int = 3,
     sleep_sec: float = 2,
     verbose: bool = True,
@@ -883,6 +911,10 @@ def call_llm_and_parse_with_retry(
     retry on failure, and parse the raw text with `parse_fn`.
     """
     vendor, client = _build_client(model, service)
+    resolved_reasoning_effort = _resolve_reasoning_effort(reasoning_effort)
+    request_reasoning_effort = (
+        resolved_reasoning_effort if _supports_reasoning_effort(vendor, model) else None
+    )
     call_trace_id = _new_trace_id_hex()
     resolved_trace_output_path, resolved_run_id = _resolve_trace_output_path(trace_output_path)
     inferred_ctx = _extract_trace_context_from_log_header(log_header)
@@ -914,6 +946,8 @@ def call_llm_and_parse_with_retry(
                 "messages": msgs,
                 "temperature": temperature
             }
+            if request_reasoning_effort:
+                create_params["reasoning_effort"] = request_reasoning_effort
             completion = client.chat.completions.create(**create_params)
 
             raw_text = completion.choices[0].message.content or ""
@@ -969,6 +1003,7 @@ def call_llm_and_parse_with_retry(
                 "usage_input_cost_usd": input_cost,
                 "usage_output_cost_usd": output_cost,
                 "usage_estimated": usage_estimated,
+                "request_reasoning_effort": request_reasoning_effort,
             }
 
             return raw_text, call_meta
@@ -1044,6 +1079,7 @@ def call_llm_and_parse_with_retry(
                 "usage_input_cost_usd": input_cost,
                 "usage_output_cost_usd": output_cost,
                 "usage_estimated": usage_estimated,
+                "request_reasoning_effort": None,
             }
             return completion.text, call_meta
 
@@ -1072,6 +1108,7 @@ def call_llm_and_parse_with_retry(
                     "service": str(service),
                     "provider": vendor,
                     "temperature": temperature,
+                    "reasoning_effort": request_reasoning_effort,
                     "attempt": attempt,
                     "max_retry": max_retry,
                     "operation": operation_name,
@@ -1151,6 +1188,7 @@ def call_llm_and_parse_with_retry(
                                 "llm.response.model": call_meta.get("response_model"),
                                 "llm.request.id": call_meta.get("request_id"),
                                 "temperature": temperature,
+                                "reasoning_effort": call_meta.get("request_reasoning_effort"),
                                 "attempt": attempt,
                                 "max_retry": max_retry,
                                 "operation": operation_name,
@@ -1219,6 +1257,7 @@ def call_llm_and_parse_with_retry(
                     "model": model,
                     "service": service,
                     "temperature": temperature,
+                    "reasoning_effort": call_meta.get("request_reasoning_effort"),
                     "vendor": vendor,
                     "provider": vendor,
                     "operation": operation_name,
@@ -1268,6 +1307,7 @@ def call_llm_and_parse_with_retry(
                                 "service": str(service),
                                 "provider": vendor,
                                 "temperature": temperature,
+                                "reasoning_effort": request_reasoning_effort,
                                 "attempt": attempt,
                                 "max_retry": max_retry,
                                 "operation": operation_name,

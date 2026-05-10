@@ -134,6 +134,7 @@ def write_training_run_metadata(config, *, config_path: str) -> str:
             "advanced_model": resolved_cfg.get("advanced_model"),
             "base_service": resolved_cfg.get("base_service"),
             "advanced_service": resolved_cfg.get("advanced_service"),
+            "reasoning_effort": resolved_cfg.get("reasoning_effort"),
         },
     }
 
