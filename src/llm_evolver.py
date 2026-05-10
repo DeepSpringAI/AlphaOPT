@@ -15,6 +15,7 @@ from .experience_library import ExperienceLibrary
 from .utils import save_log_data, extract_json_object, extract_json_array, call_llm_and_parse_with_retry
 from .dataloader import DataLoader 
 from .llm_retriever import LibraryRetrieval
+from .agent_tracing import agent_step
 from .prompts.prompts_evolve import PROMPT_INS_NEG, PROMPT_INS_UNR, PROMPT_INS_REFINEMENT
 
 #* Configure
@@ -128,26 +129,39 @@ class LibraryEvolution:
         try:
             error_message = f"\n   insight {insight.insight_id} failed to be refined for {task.id} from LLM after maximum attempts\n"
             # Call the LLM and parse the output
-            refined_result = call_llm_and_parse_with_retry(
-                model=self.model,
-                service=self.service,
-                prompt=prompt,
-                parse_fn=extract_json_object,
-                temperature=self.temp,
-                max_retry=3,
-                sleep_sec=0.5,
-                verbose=verbose,
-                error_message=error_message,
-                trace_output_path=output_dir or None,
-                trace_context={
-                    "module": "llm_evolver",
-                    "operation": "generate_neg_condition",
-                    "task_id": task.id,
-                    "iteration": iter,
-                    "insight_id": insight.insight_id,
-                    "stage": "Diagnosis",
-                },
-            )
+            with agent_step(
+                "RefineInsight",
+                agent_name="LibraryEvolution",
+                operation="generate_neg_condition",
+                task=task,
+                stage="Diagnosis",
+                iteration=iter,
+                output_path=output_dir or None,
+                span_type="TOOL",
+                metadata={"insight_id": insight.insight_id},
+            ) as step:
+                refined_result = call_llm_and_parse_with_retry(
+                    model=self.model,
+                    service=self.service,
+                    prompt=prompt,
+                    parse_fn=extract_json_object,
+                    temperature=self.temp,
+                    max_retry=3,
+                    sleep_sec=0.5,
+                    verbose=verbose,
+                    error_message=error_message,
+                    trace_output_path=output_dir or None,
+                    trace_context={
+                        "module": "llm_evolver",
+                        "agent": "LibraryEvolution",
+                        "operation": "generate_neg_condition",
+                        "task_id": task.id,
+                        "iteration": iter,
+                        "insight_id": insight.insight_id,
+                        "stage": "Diagnosis",
+                    },
+                )
+                step.set_output({"condition_generated": bool(refined_result)})
             # print(refined_result)
 
             if refined_result: # If output {} which means the insight is applicable
@@ -201,26 +215,39 @@ class LibraryEvolution:
         try:
             error_message = f"\n   insight {insight.insight_id} failed to be refined for {task.id} from LLM after maximum attempts\n"
             # Call the LLM and parse the output
-            refined_result = call_llm_and_parse_with_retry(
-                model=self.model,
-                service=self.service,
-                prompt=prompt,
-                parse_fn=extract_json_object,
-                temperature=self.temp,
-                max_retry=3,
-                sleep_sec=0.5,
-                verbose=verbose,
-                error_message=error_message,
-                trace_output_path=output_dir or None,
-                trace_context={
-                    "module": "llm_evolver",
-                    "operation": "generate_unr_condition",
-                    "task_id": task.id,
-                    "iteration": iter,
-                    "insight_id": insight.insight_id,
-                    "stage": "Diagnosis",
-                },
-            )
+            with agent_step(
+                "RefineInsight",
+                agent_name="LibraryEvolution",
+                operation="generate_unr_condition",
+                task=task,
+                stage="Diagnosis",
+                iteration=iter,
+                output_path=output_dir or None,
+                span_type="TOOL",
+                metadata={"insight_id": insight.insight_id},
+            ) as step:
+                refined_result = call_llm_and_parse_with_retry(
+                    model=self.model,
+                    service=self.service,
+                    prompt=prompt,
+                    parse_fn=extract_json_object,
+                    temperature=self.temp,
+                    max_retry=3,
+                    sleep_sec=0.5,
+                    verbose=verbose,
+                    error_message=error_message,
+                    trace_output_path=output_dir or None,
+                    trace_context={
+                        "module": "llm_evolver",
+                        "agent": "LibraryEvolution",
+                        "operation": "generate_unr_condition",
+                        "task_id": task.id,
+                        "iteration": iter,
+                        "insight_id": insight.insight_id,
+                        "stage": "Diagnosis",
+                    },
+                )
+                step.set_output({"condition_generated": bool(refined_result)})
             # print(refined_result)
 
             if refined_result:
@@ -232,7 +259,7 @@ class LibraryEvolution:
 
         return unr_condition
 
-    def refine_insight(self, iter, neg_condition_lst, unr_condition_lst, insight, path_k=5, verbose=False):
+    def refine_insight(self, iter, neg_condition_lst, unr_condition_lst, insight, path_k=5, verbose=False, output_dir=""):
         # Format insights for the prompt
         # target_ins = {k: insight.get(k) for k in ("condition", "explanation", "example")}
         # target_ins = {"condition": insight.condition, "explanation": insight.explanation, "example": insight.example}
@@ -254,25 +281,38 @@ class LibraryEvolution:
         try:
             custom_header = (f"\n==========\n[Iteration {iter}] Refine insight condition {insight.insight_id}\n==========\n")
             error_message = f"\n   insight {insight.insight_id} failed to be refined from LLM after maximum attempts\n"
-            refined_results = call_llm_and_parse_with_retry(
-                model=self.model,
-                service=self.service,
-                prompt=prompt,
-                parse_fn=extract_json_array,
-                temperature=self.temp,
-                max_retry=3,
-                sleep_sec=0.5,
-                verbose=verbose,
-                log_header=custom_header,
-                error_message=error_message,
-                trace_context={
-                    "module": "llm_evolver",
-                    "operation": "refine_insight",
-                    "iteration": iter,
-                    "insight_id": insight.insight_id,
-                    "stage": "Diagnosis",
-                },
-            )
+            with agent_step(
+                "RefineInsight",
+                agent_name="LibraryEvolution",
+                operation="refine_insight",
+                stage="Diagnosis",
+                iteration=iter,
+                output_path=output_dir or None,
+                span_type="TOOL",
+                metadata={"insight_id": insight.insight_id},
+            ) as step:
+                refined_results = call_llm_and_parse_with_retry(
+                    model=self.model,
+                    service=self.service,
+                    prompt=prompt,
+                    parse_fn=extract_json_array,
+                    temperature=self.temp,
+                    max_retry=3,
+                    sleep_sec=0.5,
+                    verbose=verbose,
+                    log_header=custom_header,
+                    error_message=error_message,
+                    trace_output_path=output_dir or None,
+                    trace_context={
+                        "module": "llm_evolver",
+                        "agent": "LibraryEvolution",
+                        "operation": "refine_insight",
+                        "iteration": iter,
+                        "insight_id": insight.insight_id,
+                        "stage": "Diagnosis",
+                    },
+                )
+                step.set_output({"variant_count": len(refined_results or [])})
         except Exception:
             traceback.print_exc()
             refined_results = []

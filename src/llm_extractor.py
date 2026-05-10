@@ -9,6 +9,7 @@ import traceback
 
 from .utils import save_log_data, call_llm_and_parse_with_retry, extract_json_array, extract_json_object
 from .dataloader import DataLoader, Task
+from .agent_tracing import agent_step, record_artifact, record_event
 from .prompts.prompts_ins import PROMPT_INS_FROM_FORMU, PROMPT_INS_FROM_PROGRAM, PROMPT_CONDUCT_MERGE, PROMPT_ONLINE_MERGE
 
 class InsightExtractor:
@@ -101,34 +102,47 @@ class InsightExtractor:
         custom_header = f"\n==========\n[Iteration {iter}] Generate insights for Task {task.id}\n==========\n"
         error_message = f"\n   Task {task.id} failed to extract generated insights after maximum attempts\n"
 
-        try:
-            # Call the LLM and parse the output
-            new_insights = call_llm_and_parse_with_retry(
-                model=self.model,
-                service=self.service,
-                prompt=prompt,
-                # Extract insights from LLM response
-                parse_fn=self.extract_insights, 
-                temperature=self.temp,
-                max_retry=3,
-                sleep_sec=0.5,
-                verbose=verbose,
-                log_header=custom_header,
-                error_message=error_message,
-                trace_output_path=output_path,
-                trace_context={
-                    "module": "llm_extractor",
-                    "operation": "generate_insights",
-                    "task_id": task.id,
-                    "iteration": iter,
-                    "stage": stage,
-                },
-            )
+        with agent_step(
+            "alphaopt.insight.generate",
+            agent_name="InsightExtractor",
+            operation="generate_insights",
+            task=task,
+            stage=stage,
+            iteration=iter,
+            output_path=output_path,
+            input={"task_id": getattr(task, "id", None), "stage": stage},
+        ) as step:
+            try:
+                # Call the LLM and parse the output
+                new_insights = call_llm_and_parse_with_retry(
+                    model=self.model,
+                    service=self.service,
+                    prompt=prompt,
+                    # Extract insights from LLM response
+                    parse_fn=self.extract_insights,
+                    temperature=self.temp,
+                    max_retry=3,
+                    sleep_sec=0.5,
+                    verbose=verbose,
+                    log_header=custom_header,
+                    error_message=error_message,
+                    trace_output_path=output_path,
+                    trace_context={
+                        "module": "llm_extractor",
+                        "agent": "InsightExtractor",
+                        "operation": "generate_insights",
+                        "task_id": task.id,
+                        "iteration": iter,
+                        "stage": stage,
+                    },
+                )
+                step.set_output({"status": "llm_completed", "stage": stage, "raw_insight_count": len(new_insights or [])})
 
-        except Exception as err:
-            print(f"\n   [WARNING] Task {task.id} Handle malformed LLM outputs after maximum retry as no insight generated\n")
-            traceback.print_exc() # print error and cause
-            return []
+            except Exception as err:
+                print(f"\n   [WARNING] Task {task.id} Handle malformed LLM outputs after maximum retry as no insight generated\n")
+                traceback.print_exc() # print error and cause
+                step.set_output({"status": "llm_parse_error", "insight_count": 0})
+                return []
 
         # Enrich each insight with default id and task metadata
         for i, ins in enumerate(new_insights):
@@ -141,7 +155,8 @@ class InsightExtractor:
         
         if save_data:
             # Save the insights to a JSON file
-            insights_path = f"{output_path}/{stage}/extracted_insights_iter_{iter}.json"
+            stage_prefix = str(stage or "insight").lower()
+            insights_path = f"{output_path}/{stage_prefix}_extracted_insights_iter_{iter}.json"
             new_insights_copy = copy.deepcopy(new_insights)
             for ins in new_insights_copy:
                 taxo = ins.get("taxonomy", {})
@@ -268,6 +283,13 @@ class InsightExtractor:
                     print("-" * 80)
             
             save_log_data(new_insights_copy, insights_path)
+            record_artifact("extracted_insights", new_insights_copy, artifact_type="json", language="json", output_path=output_path)
+
+        record_event(
+            "insights_generated",
+            {"task_id": task.id, "iteration": iter, "stage": stage, "insight_count": len(new_insights or [])},
+            output_path=output_path,
+        )
 
         return new_insights
 
@@ -276,7 +298,8 @@ class InsightExtractor:
         self, 
         candidate_insights: List[dict] = None, 
         target: int = None,
-        verbose: bool = False
+        verbose: bool = False,
+        output_path: str | None = None,
         ):
         mapping_ids = {ins["insight_id"]: ins["task_id"] for ins in candidate_insights}
         kept_fields = ["insight_id", "taxonomy", "condition", "explanation", "example"]
@@ -288,25 +311,37 @@ class InsightExtractor:
         error_message = f"\n   {target} failed to conduct insight merge after maximum attempts\n"
 
         try:
-            # Call the LLM and parse the output
-            merge_results = call_llm_and_parse_with_retry(
-                model=self.model,
-                service=self.service,
-                prompt=prompt,
-                parse_fn=extract_json_array, 
-                temperature=self.temp,
-                max_retry=3,
-                sleep_sec=0.5,
-                verbose=verbose,
-                log_header=custom_header,
-                error_message=error_message,
-                trace_context={
-                    "module": "llm_extractor",
-                    "operation": "conduct_insight_merge",
-                    "target": target,
-                    "stage": "Diagnosis",
-                },
-            )
+            with agent_step(
+                "MergeInsight",
+                agent_name="InsightExtractor",
+                operation="conduct_insight_merge",
+                stage="Diagnosis",
+                span_type="TOOL",
+                output_path=output_path,
+                input={"target": target, "candidate_count": len(candidate_insights or [])},
+            ) as step:
+                # Call the LLM and parse the output
+                merge_results = call_llm_and_parse_with_retry(
+                    model=self.model,
+                    service=self.service,
+                    prompt=prompt,
+                    parse_fn=extract_json_array,
+                    temperature=self.temp,
+                    max_retry=3,
+                    sleep_sec=0.5,
+                    verbose=verbose,
+                    log_header=custom_header,
+                    error_message=error_message,
+                    trace_output_path=output_path,
+                    trace_context={
+                        "module": "llm_extractor",
+                        "agent": "InsightExtractor",
+                        "operation": "conduct_insight_merge",
+                        "target": target,
+                        "stage": "Diagnosis",
+                    },
+                )
+                step.set_output({"merged_candidate_count": len(merge_results or [])})
 
         except Exception as err:
             print(f"\n   [WARNING] {target} Handle malformed LLM outputs after maximum retry as no insight merge\n")
@@ -335,7 +370,8 @@ class InsightExtractor:
         self, 
         new_insight: List[dict] = None, 
         library: "ExperienceLibrary" = None,
-        verbose: bool = False
+        verbose: bool = False,
+        output_path: str | None = None,
         ):
         
         # Retrieve the existing insights in the library that match the taxonomy of the new insight
@@ -370,22 +406,34 @@ class InsightExtractor:
                                             existing_insights=json.dumps(existing_insights_for_merge, indent=2, ensure_ascii=False))
         # print("prompt", prompt)
         try:
-            # Call the LLM and parse the output
-            merge_results = call_llm_and_parse_with_retry(
-                model=self.model,
-                service=self.service,
-                prompt=prompt,
-                parse_fn=extract_json_object, 
-                temperature=self.temp,
-                max_retry=3,
-                sleep_sec=0.5,
-                verbose=verbose,
-                trace_context={
-                    "module": "llm_extractor",
-                    "operation": "conduct_insight_online_merge",
-                    "stage": "Diagnosis",
-                },
-            )
+            with agent_step(
+                "MergeInsight",
+                agent_name="InsightExtractor",
+                operation="conduct_insight_online_merge",
+                stage="Diagnosis",
+                span_type="TOOL",
+                output_path=output_path,
+                input={"new_insight_count": len(new_insight or []), "existing_insight_count": len(existing_insights or [])},
+            ) as step:
+                # Call the LLM and parse the output
+                merge_results = call_llm_and_parse_with_retry(
+                    model=self.model,
+                    service=self.service,
+                    prompt=prompt,
+                    parse_fn=extract_json_object,
+                    temperature=self.temp,
+                    max_retry=3,
+                    sleep_sec=0.5,
+                    verbose=verbose,
+                    trace_output_path=output_path,
+                    trace_context={
+                        "module": "llm_extractor",
+                        "agent": "InsightExtractor",
+                        "operation": "conduct_insight_online_merge",
+                        "stage": "Diagnosis",
+                    },
+                )
+                step.set_output({"merged": bool(merge_results and merge_results.get("merged_ids"))})
 
             # print("merge_results", merge_results)
         except Exception as err:
@@ -457,7 +505,8 @@ class InsightExtractor:
         condition_failed: bool = False,
         library: Optional["ExperienceLibrary"] = None,
         candidate_formulation: Optional[str] = None,
-        verbose: bool = True
+        verbose: bool = True,
+        output_path: str | None = None,
     ) -> dict:
         """
         Modify a newly generated insight to improve its retrievability for the given task.
@@ -550,26 +599,38 @@ class InsightExtractor:
             prompt = prompt.format(problem_desc_or_math_model=problem_desc_or_math_model, modified_insight_str=modified_insight_str, taxonomy_dict=taxonomy_dict, taxonomy_rewrite_rule=taxonomy_rewrite_rule)
 
             try:
-                resp = call_llm_and_parse_with_retry(
-                    model=self.model,
-                    service=self.service,
-                    prompt=prompt,
-                    parse_fn=extract_json_object,
-                    temperature=self.temp,
-                    max_retry=3,
-                    sleep_sec=0.5,
-                    verbose=verbose,
-                    log_header=f"\n==========\n[Iteration {iter}] Modify taxonomy for retrieval - Task {task.id}\n==========\n",
-                    error_message=f"\n   Task {task.id} failed to modify taxonomy for retrieval\n",
-                    trace_output_path=output_path,
-                    trace_context={
-                        "module": "llm_extractor",
-                        "operation": "modify_new_insight_for_retrieve_taxonomy",
-                        "task_id": task.id,
-                        "iteration": iter,
-                        "stage": "Diagnosis",
-                    },
-                )
+                with agent_step(
+                    "RefineInsight",
+                    agent_name="InsightExtractor",
+                    operation="modify_new_insight_for_retrieve_taxonomy",
+                    task=task,
+                    stage="Diagnosis",
+                    iteration=iter,
+                    output_path=output_path,
+                    span_type="TOOL",
+                ) as step:
+                    resp = call_llm_and_parse_with_retry(
+                        model=self.model,
+                        service=self.service,
+                        prompt=prompt,
+                        parse_fn=extract_json_object,
+                        temperature=self.temp,
+                        max_retry=3,
+                        sleep_sec=0.5,
+                        verbose=verbose,
+                        log_header=f"\n==========\n[Iteration {iter}] Modify taxonomy for retrieval - Task {task.id}\n==========\n",
+                        error_message=f"\n   Task {task.id} failed to modify taxonomy for retrieval\n",
+                        trace_output_path=output_path,
+                        trace_context={
+                            "module": "llm_extractor",
+                            "agent": "InsightExtractor",
+                            "operation": "modify_new_insight_for_retrieve_taxonomy",
+                            "task_id": task.id,
+                            "iteration": iter,
+                            "stage": "Diagnosis",
+                        },
+                    )
+                    step.set_output({"has_taxonomy": isinstance(resp.get("taxonomy"), dict)})
                 print("⭐️ modify_new_insight_for_retrieve - taxonomy", resp)
                 new_taxo = resp.get("taxonomy")
 
@@ -638,26 +699,38 @@ class InsightExtractor:
             prompt = prompt.format(problem_desc_or_math_model=problem_desc_or_math_model, modified_insight_str=modified_insight_str, condition_rewrite_rule=condition_rewrite_rule)
 
             try:
-                resp = call_llm_and_parse_with_retry(
-                    model=self.model,
-                    service=self.service,
-                    prompt=prompt,
-                    parse_fn=extract_json_object,
-                    temperature=self.temp,
-                    max_retry=3,
-                    sleep_sec=0.5,
-                    verbose=verbose,
-                    log_header=f"\n==========\n[Iteration {iter}] Modify condition for retrieval - Task {task.id}\n==========\n",
-                    error_message=f"\n   Task {task.id} failed to modify condition for retrieval\n",
-                    trace_output_path=output_path,
-                    trace_context={
-                        "module": "llm_extractor",
-                        "operation": "modify_new_insight_for_retrieve_condition",
-                        "task_id": task.id,
-                        "iteration": iter,
-                        "stage": "Diagnosis",
-                    },
-                )
+                with agent_step(
+                    "RefineInsight",
+                    agent_name="InsightExtractor",
+                    operation="modify_new_insight_for_retrieve_condition",
+                    task=task,
+                    stage="Diagnosis",
+                    iteration=iter,
+                    output_path=output_path,
+                    span_type="TOOL",
+                ) as step:
+                    resp = call_llm_and_parse_with_retry(
+                        model=self.model,
+                        service=self.service,
+                        prompt=prompt,
+                        parse_fn=extract_json_object,
+                        temperature=self.temp,
+                        max_retry=3,
+                        sleep_sec=0.5,
+                        verbose=verbose,
+                        log_header=f"\n==========\n[Iteration {iter}] Modify condition for retrieval - Task {task.id}\n==========\n",
+                        error_message=f"\n   Task {task.id} failed to modify condition for retrieval\n",
+                        trace_output_path=output_path,
+                        trace_context={
+                            "module": "llm_extractor",
+                            "agent": "InsightExtractor",
+                            "operation": "modify_new_insight_for_retrieve_condition",
+                            "task_id": task.id,
+                            "iteration": iter,
+                            "stage": "Diagnosis",
+                        },
+                    )
+                    step.set_output({"has_condition": bool(resp.get("condition"))})
                 print("⭐️ modify_new_insight_for_retrieve - condition", resp)
                 new_condition = resp.get("condition")
                 modified_insight["condition"] = new_condition.strip()

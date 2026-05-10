@@ -10,10 +10,10 @@ import sys
 from typing import List, Tuple, Optional, Any, Callable
 
 from src.utils import cal_time_cost
-from src.dataloader import DataLoader, Task          
+from src.dataloader import DataLoader, Task
 from src.experience_library import ExperienceLibrary
 from src.llm_retriever import LibraryRetrieval
-from src.laminar_tracing import add_span_tags, set_span_attributes, set_span_output, trace_span
+from src.agent_tracing import agent_step, objective_attributes, record_artifact, record_event
 from .utils import call_llm_and_parse_with_retry
 import copy
 
@@ -34,7 +34,7 @@ def divide_insight(insight):
 
 
 def generate_solution_with_retrieval(
-            iter, task, library, llm_retri, llm_opt, 
+            iter, task, library, llm_retri, llm_opt,
             retrieved_insights=[],
             output_path="", verbose=False, save_data=True
             ):
@@ -44,81 +44,98 @@ def generate_solution_with_retrieval(
         candidate_formulation, program_output, runnable, is_time_out, retrieved_ins_ids
     """
     task_id = getattr(task, "id", None)
-    with trace_span(
+    with agent_step(
         "alphaopt.solution.generate",
+        agent_name="ProgramGenerator",
+        operation="generate_solution_with_retrieval",
+        task=task,
+        stage="Solution",
+        output_path=output_path,
         input={"task_id": task_id, "iteration": iter, "seed_insights": len(retrieved_insights or [])},
-        tags=["alphaopt", "solution-generation"],
         metadata={"phase": "solution_generation", "task_id": task_id, "iteration": iter},
         attributes={"alphaopt.task_id": str(task_id), "alphaopt.iteration": int(iter) if iter is not None else -1},
     ) as span:
         formulation_ins, program_ins = divide_insight(retrieved_insights)
 
         if not formulation_ins and any(key in ins.taxonomy for ins in library for key in ("General Formulation", "Domain Modeling")):
-            with trace_span(
+            with agent_step(
                 "alphaopt.retrieval.formulation",
+                agent_name="LibraryRetrieval",
+                operation="retrieve_formulation_insights",
+                task=task,
+                stage="Formulation",
+                output_path=output_path,
                 input={"task_id": task_id, "stage": "Formulation"},
-                tags=["alphaopt", "retrieval", "formulation"],
                 attributes={"alphaopt.task_id": str(task_id), "alphaopt.retrieval.stage": "Formulation"},
             ) as retr_span:
                 formulation_ins = llm_retri.retrieve_applicable_insights(
                     iter=iter, task=task, stage="Formulation", config=config,
                     verbose=verbose, save_data=save_data, output_path=output_path
                 )
-                set_span_output(retr_span, {"retrieved_count": len(formulation_ins or [])})
+                retr_span.set_output({"retrieved_count": len(formulation_ins or [])})
 
-        with trace_span(
+        with agent_step(
             "alphaopt.formulation.generate",
+            agent_name="ProgramGenerator",
+            operation="generate_formulation",
+            task=task,
+            stage="Formulation",
+            output_path=output_path,
             input={"task_id": task_id, "retrieved_count": len(formulation_ins or [])},
-            tags=["alphaopt", "formulation"],
             attributes={"alphaopt.task_id": str(task_id), "alphaopt.retrieved_count": len(formulation_ins or [])},
         ) as form_span:
             candidate_formulation = llm_opt.generate_formulation(
                 iter=iter, task=task, retrieved_insights=formulation_ins, abl_params=config.ablation,
                 verbose=verbose, save_data=save_data, output_path=output_path
             )
-            set_span_output(form_span, {"generated": bool(candidate_formulation)})
+            form_span.set_output({"generated": bool(candidate_formulation)})
 
         if not candidate_formulation:
-            add_span_tags(span, ["parse-error"])
-            set_span_output(span, {"generated": False})
+            span.add_tags(["parse-error"])
+            span.set_output({"generated": False})
             return None, None, None, None, None, None
 
         if not program_ins and any("Code Implementation" in ins.taxonomy for ins in library):
-            with trace_span(
+            with agent_step(
                 "alphaopt.retrieval.program",
+                agent_name="LibraryRetrieval",
+                operation="retrieve_program_insights",
+                task=task,
+                stage="Program",
+                output_path=output_path,
                 input={"task_id": task_id, "stage": "Program"},
-                tags=["alphaopt", "retrieval", "program"],
                 attributes={"alphaopt.task_id": str(task_id), "alphaopt.retrieval.stage": "Program"},
             ) as retr_span:
                 program_ins = llm_retri.retrieve_applicable_insights(
                     iter=iter, task=task, stage="Program", formulation=candidate_formulation, config=config,
                     verbose=verbose, save_data=save_data, output_path=output_path
                 )
-                set_span_output(retr_span, {"retrieved_count": len(program_ins or [])})
+                retr_span.set_output({"retrieved_count": len(program_ins or [])})
 
-        with trace_span(
+        with agent_step(
             "alphaopt.program.generate",
+            agent_name="ProgramGenerator",
+            operation="generate_program",
+            task=task,
+            stage="Program",
+            output_path=output_path,
             input={"task_id": task_id, "retrieved_count": len(program_ins or [])},
-            tags=["alphaopt", "program"],
             attributes={"alphaopt.task_id": str(task_id), "alphaopt.retrieved_count": len(program_ins or [])},
         ) as prog_span:
             candidate_program, output, runnable, is_time_out = llm_opt.generate_program(
                 iter=iter, task=task, retrieved_insights=program_ins, formulation=candidate_formulation, abl_params=config.ablation,
                 verbose=verbose, save_data=save_data, output_path=output_path
             )
-            set_span_output(prog_span, {"generated": bool(candidate_program), "runnable": bool(runnable), "timeout": bool(is_time_out)})
+            prog_span.set_output({"generated": bool(candidate_program), "runnable": bool(runnable), "timeout": bool(is_time_out)})
 
         prev_insights = formulation_ins + program_ins
-        set_span_attributes(
-            span,
-            {
-                "alphaopt.formulation_insights": len(formulation_ins or []),
-                "alphaopt.program_insights": len(program_ins or []),
-                "alphaopt.runnable": bool(runnable),
-                "alphaopt.timeout": bool(is_time_out),
-            },
-        )
-        set_span_output(span, {"runnable": bool(runnable), "timeout": bool(is_time_out), "output": str(output)[:1000]})
+        span.set_attributes({
+            "alphaopt.formulation_insights": len(formulation_ins or []),
+            "alphaopt.program_insights": len(program_ins or []),
+            "alphaopt.runnable": bool(runnable),
+            "alphaopt.timeout": bool(is_time_out),
+        })
+        span.set_output({"runnable": bool(runnable), "timeout": bool(is_time_out), "output": str(output)[:1000]})
         return prev_insights, candidate_formulation, candidate_program, output, runnable, is_time_out
 
 
@@ -147,16 +164,32 @@ def check_optimality(task, output, runnable, is_time_out):
         - feedback   : hints for code correction or debugging
     """
 
-    with trace_span(
-        "alphaopt.optimality_check",
+    with agent_step(
+        "CheckOptimality",
+        agent_name="Solver",
+        operation="check_optimality",
+        task=task,
+        stage="Optimality",
+        span_type="TOOL",
         input={"task_id": getattr(task, "id", None), "output": output, "runnable": runnable, "timeout": is_time_out},
-        tags=["alphaopt", "optimality-check"],
         attributes={"alphaopt.task_id": str(getattr(task, "id", "")), "alphaopt.runnable": bool(runnable), "alphaopt.timeout": bool(is_time_out)},
-    ) as span:
+    ) as step:
         def _finish(is_optimal, status, feedback):
-            set_span_attributes(span, {"alphaopt.status": status, "alphaopt.is_optimal": bool(is_optimal)})
-            add_span_tags(span, [status])
-            set_span_output(span, {"is_optimal": bool(is_optimal), "status": status, "feedback": feedback})
+            obj_attrs = objective_attributes(
+                output=output,
+                ground_truth=getattr(task, "ground_truth", None),
+                matched=bool(is_optimal),
+            )
+            attrs = {"alphaopt.status": status, "alphaopt.is_optimal": bool(is_optimal), **obj_attrs}
+            step.set_attributes(attrs)
+            step.add_tags([status])
+            payload = {"is_optimal": bool(is_optimal), "status": status, "feedback": feedback, **obj_attrs}
+            step.set_output(payload)
+            record_event("matched_ground_truth" if is_optimal else "ground_truth_mismatch", {
+                "task_id": getattr(task, "id", None),
+                "status": status,
+                **obj_attrs,
+            })
             return is_optimal, status, feedback
 
         # Accept broader numeric types (e.g., int, numpy scalars) to avoid misclassifying optimal outputs.
@@ -191,10 +224,10 @@ def verify_insight_retrieval(new_insights, library, target_task, llm_retri, iter
     # Ensure new_insights is a list
     if not isinstance(new_insights, list):
         new_insights = [new_insights]
-    
+
     if not new_insights:
         return
-    
+
     # Create new retriever with temporary library
     temp_llm_retri = LibraryRetrieval(
         lib=library,
@@ -202,7 +235,7 @@ def verify_insight_retrieval(new_insights, library, target_task, llm_retri, iter
         service=llm_retri.service,
         temperature=llm_retri.temp
     )
-    
+
     # Split new insights by stage based on taxonomy keys
     new_formulation_ins, new_program_ins = divide_insight(new_insights)
 
@@ -274,7 +307,7 @@ def verify_insight_retrieval(new_insights, library, target_task, llm_retri, iter
     retrieved_ins_ids = expected_insight_ids & applicable_ins_ids
     missed_insight_ids = expected_insight_ids - applicable_ins_ids
     applicability_missed = len(missed_insight_ids) > 0
-    
+
     # Print verification results
     print(f"\n   [VERIFY RETRIEVAL] Verification Results for {len(new_insights)} new insight(s) on task {target_task.id}:")
     print(f"      Expected insight IDs: {expected_insight_ids}")
@@ -282,14 +315,14 @@ def verify_insight_retrieval(new_insights, library, target_task, llm_retri, iter
     print(f"      Missed insight IDs: {missed_insight_ids}")
     print(f"      Taxonomy matched: {len(expected_insight_ids) - len(taxonomy_failed_insights)}/{len(expected_insight_ids)} insights")
     print(f"      Condition matched: {len(expected_insight_ids) - len(missed_insight_ids)}/{len(expected_insight_ids)} insights")
-    
+
     all_retrieved = len(retrieved_ins_ids) == len(expected_insight_ids)
-    
+
     if taxonomy_missed or applicability_missed:
         print(f"      ⚠️  WARNING: Some insights were not retrieved correctly!")
     else:
         print(f"      ✅ All insights were retrieved correctly on target task!")
-    
+
     # Return verification results
     return {
         'all_retrieved': all_retrieved,
@@ -303,6 +336,11 @@ def verify_insight_retrieval(new_insights, library, target_task, llm_retri, iter
 
 
 def self_verify_test(iter, task, llm_opt, new_insights, prev_insights, save_data=False, output_path=""):
+    record_event(
+        "self_verify_test_started",
+        {"task_id": task.id, "iteration": iter, "new_insights": len(new_insights or []), "prev_insights": len(prev_insights or [])},
+        output_path=output_path,
+    )
     # Combine new and previous insights
     prev_formulation_ins, prev_program_ins = divide_insight(prev_insights)
     new_formulation_ins, new_program_ins = divide_insight(new_insights)
@@ -318,7 +356,7 @@ def self_verify_test(iter, task, llm_opt, new_insights, prev_insights, save_data
         abl_params=config.ablation,
         verbose=False,
         save_data=save_data,
-        output_path=os.path.join(output_path, "self_verify")
+        output_path=output_path,
     )
 
     _, output, runnable, is_time_out = llm_opt.generate_program(
@@ -329,24 +367,36 @@ def self_verify_test(iter, task, llm_opt, new_insights, prev_insights, save_data
         abl_params=config.ablation,
         verbose=False,
         save_data=save_data,
-        output_path=os.path.join(output_path, "self_verify")
+        output_path=output_path,
     )
 
     # Check optimality with the same logic as the main pipeline (accept ints/numpy scalars, handle timeouts, etc.)
     is_optimal, _, _ = check_optimality(task=task, output=output, runnable=runnable, is_time_out=is_time_out)
+    record_event(
+        "self_verify_test_finished",
+        {
+            "task_id": task.id,
+            "iteration": iter,
+            "is_optimal": bool(is_optimal),
+            "runnable": bool(runnable),
+            "timeout": bool(is_time_out),
+            **objective_attributes(output=output, ground_truth=task.ground_truth, matched=is_optimal),
+        },
+        output_path=output_path,
+    )
     return bool(is_optimal)
 
 
 def self_verify_retrieval_and_success(
-    iter, 
-    task, 
-    llm_opt, 
-    new_insights, 
-    prev_insights, 
-    library, 
+    iter,
+    task,
+    llm_opt,
+    new_insights,
+    prev_insights,
+    library,
     llm_retri,
     candidate_formulation: str | None = None,
-    save_data=False, 
+    save_data=False,
     output_path=""
 ):
     """
@@ -376,9 +426,14 @@ def self_verify_retrieval_and_success(
         save_data=save_data,
         output_path=output_path
     )
-    
+
     if not task_success:
         # Case 4: Task failed
+        record_event(
+            "insight_verification_finished",
+            {"task_id": task.id, "iteration": iter, "task_success": False, "is_verify": False, "verified_count": 0},
+            output_path=output_path,
+        )
         return False, None, False, None
 
     # Step 2: Verify retrieval (only if task success)
@@ -390,16 +445,16 @@ def self_verify_retrieval_and_success(
         iter=iter,
         candidate_formulation=candidate_formulation,
     )
-    
+
     # Default outputs (task_success is True here)
     is_verify = False
     verified_insights = None
-    
+
     if retrieval_result is not None:
         # Check retrieval results
         all_retrieved = retrieval_result.get('all_retrieved', False)
         retrieved_insight_ids = retrieval_result.get('retrieved_insight_ids', set())
-        
+
         if all_retrieved:
             # Case 1: Task success + retrieval on all insights
             is_verify = True
@@ -417,6 +472,18 @@ def self_verify_retrieval_and_success(
 
     # If retrieval_result is None, treat as success but retrieval verification failed:
     # return is_verify=False, verified_insights=None, task_success=True, retrieval_result=None
+    record_event(
+        "insight_verification_finished",
+        {
+            "task_id": task.id,
+            "iteration": iter,
+            "task_success": True,
+            "is_verify": bool(is_verify),
+            "verified_count": len(verified_insights or []),
+            "all_retrieved": bool((retrieval_result or {}).get("all_retrieved", False)),
+        },
+        output_path=output_path,
+    )
     return is_verify, verified_insights, True, retrieval_result
 
 
@@ -608,107 +675,178 @@ def extract_code(text: str) -> str:
 
 
 def execute_code(code_str, timeout_sec=400):
-    try:
-        # Using subprocess to execute the code as a separate process
-        result = subprocess.run(
-            [sys.executable, "-u", "-"], 
-            input=code_str,
-            text=True, 
-            capture_output=True, 
-            check=True,
-            timeout=timeout_sec # Set the maximum run time
-        )
+    with agent_step(
+        "ExecuteProgram",
+        agent_name="Solver",
+        operation="execute_code",
+        span_type="TOOL",
+        input={"code_chars": len(code_str or ""), "timeout_sec": timeout_sec},
+        attributes={"alphaopt.solver.timeout_sec": timeout_sec, "alphaopt.code_chars": len(code_str or "")},
+    ) as step:
+        record_artifact("solver_input_program", code_str, artifact_type="code", language="python")
+        try:
+            # Using subprocess to execute the code as a separate process
+            result = subprocess.run(
+                [sys.executable, "-u", "-"],
+                input=code_str,
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=timeout_sec # Set the maximum run time
+            )
 
-        # Extract Gurobi's objVal (optimal objective value) from stdout
-        output = result.stdout
-        match = re.search(r"Optimal value\s*[:=]\s*([0-9.+-eE]+)", output)
+            # Extract Gurobi's objVal (optimal objective value) from stdout
+            output = result.stdout
+            record_artifact("solver_stdout", output, artifact_type="stdout", language="text")
+            if result.stderr:
+                record_artifact("solver_stderr", result.stderr, artifact_type="stderr", language="text")
+            match = re.search(r"Optimal value\s*[:=]\s*([0-9.+-eE]+)", output)
 
-        if match:
-            solution = float(match.group(1))
-            return solution
-        else:
-            return output
-        
-    except subprocess.TimeoutExpired as err:
-        return err    
-    
+            if match:
+                solution = float(match.group(1))
+                step.set_attributes({"alphaopt.solver.status": "optimal_value", "alphaopt.output_objective": solution})
+                step.set_output({"solution": solution, "stdout_chars": len(output or "")})
+                record_event("program_executed", {"runnable": True, "timeout": False, "output_objective": solution})
+                return solution
+            else:
+                step.set_attributes({"alphaopt.solver.status": "no_objective"})
+                step.set_output({"stdout": str(output)[:4000]})
+                record_event("program_executed", {"runnable": True, "timeout": False, "stdout_chars": len(output or "")})
+                return output
+
+        except subprocess.TimeoutExpired as err:
+            step.add_tags(["timeout"])
+            step.set_attributes({"alphaopt.solver.status": "timeout"})
+            step.set_output({"timeout_sec": timeout_sec})
+            record_event("program_executed", {"runnable": False, "timeout": True, "timeout_sec": timeout_sec})
+            return err
+
 
 def self_debug(
     task: "Task" = None,
     failed_program: str = None,
     feedback: str = None,
-    config: str = None
-) -> Tuple[bool, Optional[str]]:           
+    config: str = None,
+    output_path: str | None = None,
+) -> Tuple[bool, Optional[str]]:
     """
     Self-debug the failed program with LLM
     """
-    runnable = False                    
+    runnable = False
     current_program  = failed_program
     current_feedback = feedback
 
-    for attempt in range(1, config.ablation.max_debug_retry + 1):
+    with agent_step(
+        "alphaopt.self_debug",
+        agent_name="SelfDebugger",
+        operation="self_debug",
+        task=task,
+        stage="Program",
+        output_path=output_path,
+        input={"task_id": getattr(task, "id", None), "max_retry": config.ablation.max_debug_retry},
+    ) as root_step:
+        record_artifact("self_debug_initial_failed_program", failed_program, artifact_type="code", language="python")
+        record_artifact("self_debug_initial_feedback", feedback, artifact_type="text", language="text")
+        for attempt in range(1, config.ablation.max_debug_retry + 1):
+            with agent_step(
+                "SelfDebug",
+                agent_name="SelfDebugger",
+                operation="self_debug_attempt",
+                task=task,
+                stage="Program",
+                attempt=attempt,
+                output_path=output_path,
+                span_type="TOOL",
+            ) as attempt_step:
+                record_event("self_debug_retry", {"task_id": task.id, "attempt": attempt})
 
-        # Construct the prompt for diagnosis
-        prompt = PROMPT_SELF_DEBUG.format(
-            failed_program      = current_program,
-            feedback            = current_feedback        
-        )
-        
-        try:
-            corrected_program = call_llm_and_parse_with_retry(
-                model       = config.model,
-                service     = config.service,
-                prompt      = prompt,
-                # Extract code script from LLM response
-                parse_fn    = extract_code,
-                temperature = 0,
-                max_retry   = 3,                  
-                sleep_sec   = 2,
-                verbose     = False,
-                trace_context={
-                    "module": "train_eval_utils",
-                    "operation": "self_debug",
-                    "task_id": task.id,
-                    "attempt": attempt,
-                    "stage": "Program",
-                },
-            )
+                # Construct the prompt for diagnosis
+                prompt = PROMPT_SELF_DEBUG.format(
+                    failed_program      = current_program,
+                    feedback            = current_feedback
+                )
 
-            # Update prompt context with new failed program
-            current_program  = corrected_program
-
-        except Exception as err:
-            print(f"\n   [WARNING] Task {task.id}: Handle malformed LLM outputs after maximum retry as failing to correct program\n")
-            traceback.print_exc() # print error and cause
-            return False, False
-
-        #* Execute the corrected program
-        try:
-            output = execute_code(corrected_program) 
-            runnable = True
-            is_time_out = False
-            #* Add solver time limitation to avoid large time cost on solving single task
-            if isinstance(output, subprocess.TimeoutExpired):
-                is_time_out = True
-            else:
                 try:
-                    output = float(output) # ensure numerical outputs
+                    corrected_program = call_llm_and_parse_with_retry(
+                        model       = config.model,
+                        service     = config.service,
+                        prompt      = prompt,
+                        # Extract code script from LLM response
+                        parse_fn    = extract_code,
+                        temperature = 0,
+                        max_retry   = 3,
+                        sleep_sec   = 2,
+                        verbose     = False,
+                        trace_output_path=output_path,
+                        trace_context={
+                            "module": "train_eval_utils",
+                            "agent": "SelfDebugger",
+                            "operation": "self_debug",
+                            "task_id": task.id,
+                            "attempt": attempt,
+                            "stage": "Program",
+                        },
+                    )
+                    record_artifact(
+                        f"self_debug_corrected_program_attempt_{attempt}",
+                        corrected_program,
+                        artifact_type="code",
+                        language="python",
+                    )
 
-                except (TypeError, ValueError):
-                    pass # keep original output
+                    # Update prompt context with new failed program
+                    current_program  = corrected_program
 
-            # Check optimality when the program is runnable
-            is_optimal, _, current_feedback = check_optimality(task=task, output=output, runnable=runnable, is_time_out=is_time_out)
-            return is_optimal, runnable
+                except Exception:
+                    print(f"\n   [WARNING] Task {task.id}: Handle malformed LLM outputs after maximum retry as failing to correct program\n")
+                    traceback.print_exc() # print error and cause
+                    attempt_step.set_output({"status": "llm_parse_error", "runnable": False})
+                    root_step.set_output({"is_optimal": False, "runnable": False, "status": "llm_parse_error"})
+                    return False, False
 
-        except Exception as err:
-            # Update prompt context with feedback about execution error
-            current_feedback = f"Execution error:\n {err.stderr}"
+                #* Execute the corrected program
+                try:
+                    output = execute_code(corrected_program)
+                    runnable = True
+                    is_time_out = False
+                    #* Add solver time limitation to avoid large time cost on solving single task
+                    if isinstance(output, subprocess.TimeoutExpired):
+                        is_time_out = True
+                    else:
+                        try:
+                            output = float(output) # ensure numerical outputs
 
-    # Reached maximum retry for correction without successful execution
-    is_optimal = False
+                        except (TypeError, ValueError):
+                            pass # keep original output
 
-    return is_optimal, runnable
+                    record_artifact(
+                        f"self_debug_execution_output_attempt_{attempt}",
+                        output,
+                        artifact_type="stdout",
+                        language="text",
+                    )
+                    # Check optimality when the program is runnable
+                    is_optimal, status, current_feedback = check_optimality(task=task, output=output, runnable=runnable, is_time_out=is_time_out)
+                    obj_attrs = objective_attributes(output=output, ground_truth=task.ground_truth, matched=is_optimal)
+                    attempt_step.set_attributes({"alphaopt.status": status, "alphaopt.runnable": bool(runnable), **obj_attrs})
+                    attempt_step.set_output({"is_optimal": bool(is_optimal), "runnable": bool(runnable), "status": status, **obj_attrs})
+                    root_step.set_output({"is_optimal": bool(is_optimal), "runnable": bool(runnable), "status": status, **obj_attrs})
+                    return is_optimal, runnable
+
+                except Exception as err:
+                    # Update prompt context with feedback about execution error
+                    current_feedback = f"Execution error:\n {getattr(err, 'stderr', str(err))}"
+                    record_artifact(
+                        f"self_debug_execution_error_attempt_{attempt}",
+                        current_feedback,
+                        artifact_type="stderr",
+                        language="text",
+                    )
+
+        # Reached maximum retry for correction without successful execution
+        is_optimal = False
+        root_step.set_output({"is_optimal": False, "runnable": bool(runnable), "status": "max_retry"})
+        return is_optimal, runnable
 
 
 def self_correction(
@@ -716,84 +854,117 @@ def self_correction(
     failed_formulation: str = None,
     failed_program: str = None,
     feedback: str = None,
-    config: str = None
-) -> Tuple[bool, Optional[str]]:           
+    config: str = None,
+    output_path: str | None = None,
+) -> Tuple[bool, Optional[str]]:
     """
     Self-correct the failed formulation and program with LLM
     """
-    runnable = False                    
+    runnable = False
     current_formulation  = failed_formulation
     current_program  = failed_program
     current_feedback = feedback
 
-    for attempt in range(1, config.ablation.max_correction_retry + 1):
+    with agent_step(
+        "alphaopt.self_correction",
+        agent_name="SelfDebugger",
+        operation="self_correction",
+        task=task,
+        stage="Program",
+        output_path=output_path,
+        input={"task_id": getattr(task, "id", None), "max_retry": config.ablation.max_correction_retry},
+    ) as root_step:
+        record_artifact("self_correction_failed_formulation", failed_formulation, artifact_type="text", language="text")
+        record_artifact("self_correction_failed_program", failed_program, artifact_type="code", language="python")
+        for attempt in range(1, config.ablation.max_correction_retry + 1):
+            with agent_step(
+                "SelfDebug",
+                agent_name="SelfDebugger",
+                operation="self_correction_attempt",
+                task=task,
+                stage="Program",
+                attempt=attempt,
+                output_path=output_path,
+                span_type="TOOL",
+            ) as attempt_step:
+                record_event("self_correction_retry", {"task_id": task.id, "attempt": attempt})
 
-        # Construct the prompt for diagnosis
-        prompt = PROMPT_SELF_CORRECTION.format(
-            failed_formulation  = current_formulation,
-            failed_program      = current_program,
-            feedback            = current_feedback        
-        )
-        
-        try:
-            corrected_program = call_llm_and_parse_with_retry(
-                model       = config.model,
-                service     = config.service,
-                prompt      = prompt,
-                # Extract code script from LLM response
-                parse_fn    = extract_code,
-                temperature = 0,
-                max_retry   = 3,                  
-                sleep_sec   = 2,
-                verbose     = False,
-                trace_context={
-                    "module": "train_eval_utils",
-                    "operation": "self_correction",
-                    "task_id": task.id,
-                    "attempt": attempt,
-                    "stage": "Program",
-                },
-            )
+                # Construct the prompt for diagnosis
+                prompt = PROMPT_SELF_CORRECTION.format(
+                    failed_formulation  = current_formulation,
+                    failed_program      = current_program,
+                    feedback            = current_feedback
+                )
 
-            # Update prompt context with new failed program
-            current_program  = corrected_program
-
-        except Exception as err:
-            print(f"\n   [WARNING] Task {task.id}: Handle malformed LLM outputs after maximum retry as failing to correct program\n")
-            traceback.print_exc() # print error and cause
-            return False, False
-
-        #* Execute the corrected program
-        try:
-            output = execute_code(corrected_program) 
-            runnable = True
-            is_time_out = False
-            #* Add solver time limitation to avoid large time cost on solving single task
-            if isinstance(output, subprocess.TimeoutExpired):
-                is_time_out = True
-            else:
                 try:
-                    output = float(output) # ensure numerical outputs
+                    corrected_program = call_llm_and_parse_with_retry(
+                        model       = config.model,
+                        service     = config.service,
+                        prompt      = prompt,
+                        # Extract code script from LLM response
+                        parse_fn    = extract_code,
+                        temperature = 0,
+                        max_retry   = 3,
+                        sleep_sec   = 2,
+                        verbose     = False,
+                        trace_output_path=output_path,
+                        trace_context={
+                            "module": "train_eval_utils",
+                            "agent": "SelfDebugger",
+                            "operation": "self_correction",
+                            "task_id": task.id,
+                            "attempt": attempt,
+                            "stage": "Program",
+                        },
+                    )
+                    record_artifact(f"self_correction_corrected_program_attempt_{attempt}", corrected_program, artifact_type="code", language="python")
 
-                except (TypeError, ValueError):
-                    pass # keep original output
+                    # Update prompt context with new failed program
+                    current_program  = corrected_program
 
-            # Check optimality when the program is runnable
-            is_optimal, _, current_feedback = check_optimality(task=task, output=output, runnable=runnable, is_time_out=is_time_out)
-            return is_optimal, runnable
+                except Exception:
+                    print(f"\n   [WARNING] Task {task.id}: Handle malformed LLM outputs after maximum retry as failing to correct program\n")
+                    traceback.print_exc() # print error and cause
+                    root_step.set_output({"is_optimal": False, "runnable": False, "status": "llm_parse_error"})
+                    return False, False
 
-        except Exception as err:
-            # Update prompt context with feedback about execution error
-            current_feedback = f"Execution error:\n {err.stderr}"
+                #* Execute the corrected program
+                try:
+                    output = execute_code(corrected_program)
+                    runnable = True
+                    is_time_out = False
+                    #* Add solver time limitation to avoid large time cost on solving single task
+                    if isinstance(output, subprocess.TimeoutExpired):
+                        is_time_out = True
+                    else:
+                        try:
+                            output = float(output) # ensure numerical outputs
 
-    # Reached maximum retry for correction without successful execution
-    is_optimal = False
+                        except (TypeError, ValueError):
+                            pass # keep original output
 
-    return is_optimal, runnable
+                    record_artifact(f"self_correction_execution_output_attempt_{attempt}", output, artifact_type="stdout", language="text")
+                    # Check optimality when the program is runnable
+                    is_optimal, status, current_feedback = check_optimality(task=task, output=output, runnable=runnable, is_time_out=is_time_out)
+                    obj_attrs = objective_attributes(output=output, ground_truth=task.ground_truth, matched=is_optimal)
+                    attempt_step.set_attributes({"alphaopt.status": status, "alphaopt.runnable": bool(runnable), **obj_attrs})
+                    attempt_step.set_output({"is_optimal": bool(is_optimal), "runnable": bool(runnable), "status": status, **obj_attrs})
+                    root_step.set_output({"is_optimal": bool(is_optimal), "runnable": bool(runnable), "status": status, **obj_attrs})
+                    return is_optimal, runnable
+
+                except Exception as err:
+                    # Update prompt context with feedback about execution error
+                    current_feedback = f"Execution error:\n {getattr(err, 'stderr', str(err))}"
+                    record_artifact(f"self_correction_execution_error_attempt_{attempt}", current_feedback, artifact_type="stderr", language="text")
+
+        # Reached maximum retry for correction without successful execution
+        is_optimal = False
+        root_step.set_output({"is_optimal": False, "runnable": bool(runnable), "status": "max_retry"})
+        return is_optimal, runnable
 
 
 PROMPT_SELF_DEBUG="""
-You are an expert in Industrial Engineering and Operations Research. 
+You are an expert in Industrial Engineering and Operations Research.
 
 You are given:
 1. A Gurobi program failed to execution
@@ -902,7 +1073,7 @@ def self_correction(ques, five, code, output, error):
 
         {code}
 
-        Run the code and get the following running information. 
+        Run the code and get the following running information.
 
         {output}
         {error}

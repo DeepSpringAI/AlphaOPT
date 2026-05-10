@@ -14,10 +14,13 @@ from src.llm_evolver import LibraryEvolution
 from src.laminar_tracing import (
     add_span_tags,
     current_trace_id,
+    flush_laminar,
+    init_laminar_from_env,
     record_exception as laminar_record_exception,
     record_trace_index,
     set_span_attributes,
     set_span_output,
+    set_trace_metadata,
     trace_span,
 )
 
@@ -47,13 +50,15 @@ def run_library_refinement(
             3) Build K library variants and verify retrieval to choose the best.
         Returns a dict with final condition and distribution to be merged in the main thread.
         """
+        dataset_name = getattr(config, "dataset", None) or ",".join(map(str, getattr(config, "datasets", []) or []))
         with trace_span(
-            "alphaopt.training.refinement.insight",
+            "alphaopt.task",
             input={"insight_id": getattr(ins, "insight_id", None), "condition": getattr(ins, "condition", None)},
-            tags=["alphaopt", "train", "refinement", f"iter-{iter}"],
+            tags=["alphaopt", "train", "refinement", f"iter-{iter}", f"dataset:{dataset_name}" if dataset_name else ""],
             metadata={
                 "mode": "training",
                 "phase": "refinement",
+                "dataset": dataset_name,
                 "insight_id": getattr(ins, "insight_id", None),
                 "iteration": iter,
                 "output_path": output_path,
@@ -61,11 +66,23 @@ def run_library_refinement(
             attributes={
                 "alphaopt.mode": "training",
                 "alphaopt.phase": "refinement",
+                "alphaopt.dataset": dataset_name,
                 "alphaopt.insight_id": str(getattr(ins, "insight_id", "")),
                 "alphaopt.iteration": int(iter),
             },
+            session_id=f"refinement:{config.output_folder}:iter-{iter}",
         ) as root_span:
           try:
+            set_trace_metadata(
+                {
+                    "mode": "training",
+                    "phase": "refinement",
+                    "dataset": dataset_name,
+                    "insight_id": getattr(ins, "insight_id", None),
+                    "iteration": iter,
+                    "output_path": output_path,
+                }
+            )
             res = _process_one_insight_impl(ins)
             trace_id = current_trace_id()
             status = "skipped" if not res else ("accepted" if res.get("refinement_accepted") else "not_accepted")
@@ -156,7 +173,15 @@ def run_library_refinement(
             unr_condition_lst.append(unr_condition)
 
         #* Refine insight conditions 
-        refined_conditions_k = llm_evolve.refine_insight(iter, neg_condition_lst, unr_condition_lst, ins, config.params.variant_num, verbose=verbose)
+        refined_conditions_k = llm_evolve.refine_insight(
+            iter,
+            neg_condition_lst,
+            unr_condition_lst,
+            ins,
+            config.params.variant_num,
+            verbose=verbose,
+            output_dir=output_path,
+        )
 
         # Build K library variants and evaluate
         library_variants_k = llm_evolve.build_library_variant(ins.insight_id, refined_conditions_k)
@@ -418,6 +443,11 @@ if __name__ == "__main__":
     from src.config import load_train_config
 
     config = load_train_config()
+    init_laminar_from_env(
+        mode="training",
+        config_path=os.getenv("ALPHAOPT_TRAIN_CONFIG"),
+        metadata={"phase": "refinement"},
+    )
 
     start_time = time.time()
 
@@ -472,3 +502,4 @@ if __name__ == "__main__":
 
     # Count time cost
     total_duration = cal_time_cost(start_time, f'The library refinement process')
+    flush_laminar()

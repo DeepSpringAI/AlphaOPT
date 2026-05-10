@@ -7,6 +7,7 @@ import traceback
 import itertools
 
 from .utils import save_log_data, extract_json_array, call_llm_and_parse_with_retry
+from .agent_tracing import agent_step, objective_attributes, record_artifact, record_event
 from .dataloader import DataLoader, Task
 from .llm_programmer import ProgramGenerator
 from .llm_retriever import LibraryRetrieval
@@ -35,7 +36,7 @@ class ProgramDiagnostic:
         self.service = service
         self.temp = temperature
 
-    
+
     def extract_code(self, text: str) -> str:
         """
         Extract a clean Python code snippet from the LLM output
@@ -71,28 +72,49 @@ class ProgramDiagnostic:
 
 
     def execute_code(self, file_path, timeout_sec=400):
-        try:
-            # Using subprocess to execute the code as a separate process
-            result = subprocess.run(
-                ["python", file_path], 
-                capture_output=True, 
-                text=True, 
-                check=True,
-                timeout=timeout_sec # Set the maximum run time
-            )
+        with agent_step(
+            "ExecuteProgram",
+            agent_name="Solver",
+            operation="execute_code_file",
+            span_type="TOOL",
+            input={"file_path": file_path, "timeout_sec": timeout_sec},
+            attributes={"alphaopt.solver.timeout_sec": timeout_sec, "alphaopt.program_path": file_path},
+        ) as step:
+            try:
+                # Using subprocess to execute the code as a separate process
+                result = subprocess.run(
+                    ["python", file_path],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=timeout_sec # Set the maximum run time
+                )
 
-            # Extract Gurobi's objVal (optimal objective value) from stdout
-            output = result.stdout
-            match = re.search(r"Optimal value\s*[:=]\s*([0-9.+-eE]+)", output)
+                # Extract Gurobi's objVal (optimal objective value) from stdout
+                output = result.stdout
+                record_artifact("solver_stdout", output, artifact_type="stdout", language="text")
+                if result.stderr:
+                    record_artifact("solver_stderr", result.stderr, artifact_type="stderr", language="text")
+                match = re.search(r"Optimal value\s*[:=]\s*([0-9.+-eE]+)", output)
 
-            if match:
-                solution = float(match.group(1))
-                return solution
-            else:
-                return output
-            
-        except subprocess.TimeoutExpired as err:
-            return err
+                if match:
+                    solution = float(match.group(1))
+                    step.set_attributes({"alphaopt.solver.status": "optimal_value", "alphaopt.output_objective": solution})
+                    step.set_output({"solution": solution, "stdout_chars": len(output or "")})
+                    record_event("program_executed", {"runnable": True, "timeout": False, "output_objective": solution})
+                    return solution
+                else:
+                    step.set_attributes({"alphaopt.solver.status": "no_objective"})
+                    step.set_output({"stdout": str(output)[:4000]})
+                    record_event("program_executed", {"runnable": True, "timeout": False, "stdout_chars": len(output or "")})
+                    return output
+
+            except subprocess.TimeoutExpired as err:
+                step.add_tags(["timeout"])
+                step.set_attributes({"alphaopt.solver.status": "timeout"})
+                step.set_output({"timeout_sec": timeout_sec})
+                record_event("program_executed", {"runnable": False, "timeout": True, "timeout_sec": timeout_sec})
+                return err
 
 
     def _diagnose_issues(
@@ -104,7 +126,7 @@ class ProgramDiagnostic:
         verbose: bool = False,
         save_data: bool = False,
         output_path: str = "learning",
-    ):           
+    ):
         """
         Diagnose the issues in the failed formulation
         """
@@ -117,10 +139,10 @@ class ProgramDiagnostic:
             correct_program=task.correct_program,
         )
 
-        # Call the LLM to generate the answer and extract code from string 
+        # Call the LLM to generate the answer and extract code from string
         log_header = (f"\n==========\n[Iteration {iter}] Diagnose the issues in Task {task.id}\n==========\n")
         error_message = f"\n   Task {task.id} failed to diagnose issues from LLM after maximum attempts\n"
-        
+
         try:
             diagnosed_issues = call_llm_and_parse_with_retry(
                 model       = self.model,
@@ -129,7 +151,7 @@ class ProgramDiagnostic:
                 # Extract code script from LLM response
                 parse_fn    = extract_json_array,
                 temperature = self.temp,
-                max_retry   = 5,                  
+                max_retry   = 5,
                 sleep_sec   = 2,
                 verbose     = verbose,
                 log_header  = log_header,
@@ -168,7 +190,7 @@ class ProgramDiagnostic:
         verbose: bool = False,
         save_data: bool = False,
         output_path: str = "learning",
-    ):           
+    ):
         """
         Diagnose the state of retrieved insights (positive or negative)
         """
@@ -182,10 +204,10 @@ class ProgramDiagnostic:
             retrieved_insights=formulation_ins,
         )
 
-        # Call the LLM to generate the answer and extract code from string 
+        # Call the LLM to generate the answer and extract code from string
         log_header = (f"\n==========\n[Iteration {iter}] Diagnose the failed mathematical formulation for Task {task.id}\n==========\n")
         error_message = f"\n   Task {task.id} failed to diagnose mathematical formulation from LLM after maximum attempts\n"
-        
+
         try:
             insights_diag = call_llm_and_parse_with_retry(
                 model       = self.model,
@@ -194,7 +216,7 @@ class ProgramDiagnostic:
                 # Extract code script from LLM response
                 parse_fn    = extract_json_array,
                 temperature = self.temp,
-                max_retry   = 5,                  
+                max_retry   = 5,
                 sleep_sec   = 2,
                 verbose     = verbose,
                 log_header  = log_header,
@@ -273,11 +295,11 @@ class ProgramDiagnostic:
             is_optimal, _, feedback = check_optimality(task=task, output=output, runnable=runnable, is_time_out=is_time_out)
             if is_optimal:
                 # It is not necessary to generate new insights
-                is_retrieve_new = False 
+                is_retrieve_new = False
                 updated_issues = None
 
             else:
-                is_retrieve_new = True 
+                is_retrieve_new = True
 
                 #* Diagnose the issues in the new formulation again after removing negative insights
                 updated_issues = self._diagnose_issues(
@@ -593,8 +615,8 @@ class ProgramDiagnostic:
         llm_retri: "LibraryRetrieval" = None,
         verbose: bool = False,
         save_data: bool = False,
-        output_path: str = "learning",            
-    ) -> Tuple[bool, Optional[str]]:           
+        output_path: str = "learning",
+    ) -> Tuple[bool, Optional[str]]:
         """
         Diagnose the candidate mathematical formulation
         """
@@ -607,7 +629,7 @@ class ProgramDiagnostic:
                 task=task,
                 formulation=failed_formulation,
                 diagnosed_issues=diagnosed_issues,
-                filter_fn=lambda ins: ins.insight_id not in exclude_ids, 
+                filter_fn=lambda ins: ins.insight_id not in exclude_ids,
                 verbose=verbose,
                 save_data=save_data,
                 output_path=output_path,
@@ -656,7 +678,7 @@ class ProgramDiagnostic:
                 new_formulation=corrected_formulation
             )
 
-            # Call the LLM to generate the answer and extract code from string 
+            # Call the LLM to generate the answer and extract code from string
             log_header = (f"\n==========\n[Iteration {iter}] Validate the regenerated mathematical formulation based on NO.{idx+1} unretrieved insights set for Task {task.id}\n==========\n")
             error_message = f"\n   Task {task.id} failed to validate regenerated mathematical formulation from LLM after maximum attempts\n"
             try:
@@ -667,7 +689,7 @@ class ProgramDiagnostic:
                     # Extract code script from LLM response
                     parse_fn    = extract_json_array,
                     temperature = self.temp,
-                    max_retry   = 5,                  
+                    max_retry   = 5,
                     sleep_sec   = 2,
                     verbose     = verbose,
                     log_header  = log_header,
@@ -681,7 +703,7 @@ class ProgramDiagnostic:
                         "stage": "Diagnosis",
                     },
                 )
-                
+
             except Exception as err:
                 print(f"\n   [WARNING] Task {task.id}: Handle malformed LLM outputs after maximum retry as failing to validate regenerated mathematical formulation\n")
                 traceback.print_exc() # print error and cause
@@ -690,7 +712,7 @@ class ProgramDiagnostic:
             # Save the issues status for each combination
             combo_issues_status.append(issues_status)
 
-            #* If all issues are solved, try to generate program and check optimality 
+            #* If all issues are solved, try to generate program and check optimality
             all_solved = all(item["status"] == "solved" for item in issues_status)
             if all_solved:
                 # {insight_id: unretrieved}
@@ -709,7 +731,7 @@ class ProgramDiagnostic:
                 # Check optimality
                 if isinstance(output, (float, int)) and is_optimal_with_tolerance(output=output, gt=task.ground_truth):
                     # It is not necessary to generate new insights
-                    is_generate_new = False 
+                    is_generate_new = False
                     new_formulation = None
                     break
                 # All solved but not optimal
@@ -717,7 +739,7 @@ class ProgramDiagnostic:
                     # is_generate_new = True
                     new_formulation = corrected_formulation
                     break
-        
+
         if (not all_solved) and is_generate_new and combo_issues_status:
             # Count the number of "unsolved" items within each combo
             unsolved_counts = [sum(1 for issue in combo if issue["status"] == "unsolved") for combo in combo_issues_status]
@@ -726,7 +748,7 @@ class ProgramDiagnostic:
                 target_idx = unsolved_counts.index(min_count)  # Choose combination with least unsolved issues
             else:
                 target_idx = 0
-            
+
             unretrieved_ins = combo_unretrieved_ins[target_idx]
             new_formulation = combo_corrected_forms[target_idx]
             issues_status = combo_issues_status[target_idx]
@@ -748,7 +770,7 @@ class ProgramDiagnostic:
             issues_path = f"{output_path}/Diagnosis/issues_status_iter_{iter}.json"
             save_log_data(new_formulation, formu_path)
             save_log_data(issues_status, issues_path)
-            
+
         return insights_diag, unretrieved_ins, is_generate_new, new_formulation
 
 
@@ -764,7 +786,7 @@ class ProgramDiagnostic:
         verbose: bool = False,
         save_data: bool = False,
         output_path: str = "learning",
-    ) -> Tuple[bool, Optional[str]]:           
+    ) -> Tuple[bool, Optional[str]]:
         """
         Diagnose failed formulation and the effectiveness of retrieved insights
         """
@@ -796,7 +818,7 @@ class ProgramDiagnostic:
         if not is_retrieve_new:
             print("The retrieved insights are sufficient to solve the task after removing negative insights!")
             is_generate_new = False
-            return insights_diag, is_generate_new, None, None 
+            return insights_diag, is_generate_new, None, None
 
         else:
             retrieved_insights[0] = pos_formulation_ins # Only keep positive insights
@@ -811,14 +833,14 @@ class ProgramDiagnostic:
                 llm_retri=llm_retri,
                 verbose=False,
                 save_data=save_data,
-                output_path=output_path,            
-            )  
+                output_path=output_path,
+            )
 
             if not is_generate_new:
                 print("The existing insights are sufficient to solve the task after adding unretrieved insights!")
 
             insights_diag.update(insights_diag_new)
-            
+
             updated_formulation_ins = pos_formulation_ins + unretrieved_ins
 
             return insights_diag, updated_formulation_ins, is_generate_new, new_formulation
@@ -833,89 +855,129 @@ class ProgramDiagnostic:
         verbose: bool = False,
         save_data: bool = False,
         output_path: str = "learning",
-    ) -> Tuple[bool, Optional[str]]:           
+    ) -> Tuple[bool, Optional[str]]:
         """
         Diagnose and correct the failed program with LLM
         """
         max_retry_correct = 8
-        runnable = False                    
+        runnable = False
         current_program  = failed_program
         current_feedback = feedback
+        record_artifact("debug_program_initial_failed_program", failed_program, artifact_type="code", language="python", output_path=output_path)
+        record_artifact("debug_program_initial_feedback", feedback, artifact_type="text", language="text", output_path=output_path)
 
         for attempt in range(1, max_retry_correct + 1):
+            with agent_step(
+                "DiagnoseProgram",
+                agent_name="ProgramDiagnostic",
+                operation="debug_program_attempt",
+                task=task,
+                stage="Program",
+                iteration=iter,
+                attempt=attempt,
+                output_path=output_path,
+                span_type="TOOL",
+            ) as attempt_step:
+                record_event("debug_program_attempt_started", {"task_id": task.id, "iteration": iter, "attempt": attempt}, output_path=output_path)
 
-            # Construct the prompt for diagnosis
-            prompt = PROMPT_PROGRAM_DIAG.format(
-                failed_program      = current_program,
-                feedback            = current_feedback,
-                # correct_program     = task.correct_program,
-            )
-
-            # Call the LLM to generate the answer and extract code from string 
-            log_header = (f"\n==========\n[Iteration {iter}] Diagnose and correct the failed program for Task {task.id} at attempt {attempt} \n==========\n")
-            error_message = f"\n   Task {task.id} failed to extract code from LLM after maximum attempts\n"
-            
-            try:
-                corrected_program = call_llm_and_parse_with_retry(
-                    model       = self.model,
-                    service     = self.service,
-                    prompt      = prompt,
-                    # Extract code script from LLM response
-                    parse_fn    = self.extract_code,
-                    temperature = self.temp,
-                    max_retry   = 5,                  
-                    sleep_sec   = 2,
-                    verbose     = verbose,
-                    log_header  = log_header,
-                    error_message = error_message,
-                    trace_output_path=output_path,
-                    trace_context={
-                        "module": "llm_diagnostic",
-                        "operation": "debug_program",
-                        "task_id": task.id,
-                        "iteration": iter,
-                        "attempt": attempt,
-                        "stage": "Program",
-                    },
+                # Construct the prompt for diagnosis
+                prompt = PROMPT_PROGRAM_DIAG.format(
+                    failed_program      = current_program,
+                    feedback            = current_feedback,
+                    # correct_program     = task.correct_program,
                 )
 
-                # Update prompt context with new failed program
-                current_program  = corrected_program
+                # Call the LLM to generate the answer and extract code from string
+                log_header = (f"\n==========\n[Iteration {iter}] Diagnose and correct the failed program for Task {task.id} at attempt {attempt} \n==========\n")
+                error_message = f"\n   Task {task.id} failed to extract code from LLM after maximum attempts\n"
 
-            except Exception as err:
-                print(f"\n   [WARNING] Task {task.id}: Handle malformed LLM outputs after maximum retry as failing to correct program\n")
-                traceback.print_exc() # print error and cause
-                return False, None, None, None
+                try:
+                    corrected_program = call_llm_and_parse_with_retry(
+                        model       = self.model,
+                        service     = self.service,
+                        prompt      = prompt,
+                        # Extract code script from LLM response
+                        parse_fn    = self.extract_code,
+                        temperature = self.temp,
+                        max_retry   = 5,
+                        sleep_sec   = 2,
+                        verbose     = verbose,
+                        log_header  = log_header,
+                        error_message = error_message,
+                        trace_output_path=output_path,
+                        trace_context={
+                            "module": "llm_diagnostic",
+                            "agent": "ProgramDiagnostic",
+                            "operation": "debug_program",
+                            "task_id": task.id,
+                            "iteration": iter,
+                            "attempt": attempt,
+                            "stage": "Program",
+                        },
+                    )
 
-            # Save and run corrected code 
-            program_path = (f"{output_path}/corrected_program_iter_{iter}.py")
-            save_log_data(corrected_program, program_path)
+                    # Update prompt context with new failed program
+                    current_program  = corrected_program
+                    record_artifact(
+                        f"debug_program_corrected_program_attempt_{attempt}",
+                        corrected_program,
+                        artifact_type="code",
+                        language="python",
+                        output_path=output_path,
+                    )
 
-            #* Execute the corrected program
-            try:
-                output = self.execute_code(program_path) 
-                runnable = True
-                is_time_out = False
-                #* Add solver time limitation to avoid large time cost on solving single task
-                if isinstance(output, subprocess.TimeoutExpired):
-                    print(f"\n   [Task {task.id}] exceeded maximum run time and was terminated\n")
-                    is_time_out = True
-                else:
-                    try:
-                        output = float(output) # ensure numerical outputs
+                except Exception as err:
+                    print(f"\n   [WARNING] Task {task.id}: Handle malformed LLM outputs after maximum retry as failing to correct program\n")
+                    traceback.print_exc() # print error and cause
+                    attempt_step.set_output({"status": "llm_parse_error", "runnable": False})
+                    return False, None, None, None
 
-                    except (TypeError, ValueError):
-                        pass # keep original output
+                # Save and run corrected code
+                program_path = (f"{output_path}/corrected_program_iter_{iter}.py")
+                save_log_data(corrected_program, program_path)
 
-                # Check optimality when the program is runnable
-                is_optimal, output_status, current_feedback = check_optimality(task=task, output=output, runnable=runnable, is_time_out=is_time_out)
-                # if runnable, output the current feedback
-                return is_optimal, runnable, corrected_program, current_feedback
+                #* Execute the corrected program
+                try:
+                    output = self.execute_code(program_path)
+                    runnable = True
+                    is_time_out = False
+                    #* Add solver time limitation to avoid large time cost on solving single task
+                    if isinstance(output, subprocess.TimeoutExpired):
+                        print(f"\n   [Task {task.id}] exceeded maximum run time and was terminated\n")
+                        is_time_out = True
+                    else:
+                        try:
+                            output = float(output) # ensure numerical outputs
 
-            except Exception as err:
-                # Update prompt context with feedback about execution error
-                current_feedback = f"Execution error:\n {err.stderr}"
-                print(f"\n   [Task {task.id}] failed to execute program on attempt {attempt}:\n{err.stderr}.")
+                        except (TypeError, ValueError):
+                            pass # keep original output
+
+                    record_artifact(
+                        f"debug_program_execution_output_attempt_{attempt}",
+                        output,
+                        artifact_type="stdout",
+                        language="text",
+                        output_path=output_path,
+                    )
+                    # Check optimality when the program is runnable
+                    is_optimal, output_status, current_feedback = check_optimality(task=task, output=output, runnable=runnable, is_time_out=is_time_out)
+                    obj_attrs = objective_attributes(output=output, ground_truth=task.ground_truth, matched=is_optimal)
+                    attempt_step.set_attributes({"alphaopt.status": output_status, "alphaopt.runnable": bool(runnable), **obj_attrs})
+                    attempt_step.set_output({"is_optimal": bool(is_optimal), "runnable": bool(runnable), "status": output_status, **obj_attrs})
+                    # if runnable, output the current feedback
+                    return is_optimal, runnable, corrected_program, current_feedback
+
+                except Exception as err:
+                    # Update prompt context with feedback about execution error
+                    current_feedback = f"Execution error:\n {getattr(err, 'stderr', str(err))}"
+                    record_artifact(
+                        f"debug_program_execution_error_attempt_{attempt}",
+                        current_feedback,
+                        artifact_type="stderr",
+                        language="text",
+                        output_path=output_path,
+                    )
+                    print(f"\n   [Task {task.id}] failed to execute program on attempt {attempt}:\n{getattr(err, 'stderr', str(err))}.")
 
         # Reached maximum retry for correction without successful execution
         print(f"\n   [Task {task.id}]: Maximum retry reached. Failed to fix the program. Skip!")

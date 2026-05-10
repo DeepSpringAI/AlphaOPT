@@ -6,6 +6,7 @@ import traceback
 
 from .experience_library import ExperienceLibrary, Insight
 from .utils import save_log_data, call_llm_and_parse_with_retry, extract_json_array
+from .agent_tracing import agent_step, record_artifact, record_event
 from .dataloader import DataLoader, Task
 from .prompts.prompts_diag import PROMPT_RETRI_LABEL, PROMPT_RETRI_INS
 from .prompts.prompts_retri import PROMPT_QUICK_MATCH_MODEL, PROMPT_FULL_CHECK_MODEL, PROMPT_QUICK_MATCH_CODE, PROMPT_FULL_CHECK_CODE
@@ -161,32 +162,47 @@ class LibraryRetrieval:
                         taxo=json.dumps(self.library.taxonomy["Code Implementation"], indent=2, ensure_ascii=False)
                             )
 
-        trace_output_path = f"{output_path}/{stage}" if output_path else None
+        trace_output_path = output_path
             
         custom_header = f"\n==========\n[Iteration {iter}] Quickly match library insights by taxnomoy for [{stage}] generation of Task {task.id}\n==========\n"
         error_message = f"\n   [{stage}] Task {task.id} failed to extract matched insight labels after maximum attempts\n"
 
         try:
-            # Call the LLM and parse the output (==== ... ==== JSON block)
-            matched_taxo = call_llm_and_parse_with_retry(
-                model=self.model,
-                service=self.service,
-                prompt=prompt,
-                parse_fn=self.extract_taxonomy, 
-                temperature=0,
-                max_retry=3,
-                sleep_sec=5,
-                verbose=verbose,
-                log_header=custom_header,
-                error_message=error_message,
-                trace_output_path=trace_output_path,
-                trace_context={
-                    "operation": "quick_match_by_taxonomy",
-                    "task_id": task.id,
-                    "stage": stage,
-                    "iteration": iter,
-                },
-            )
+            with agent_step(
+                "RetrieveInsights",
+                agent_name="LibraryRetrieval",
+                operation="quick_match_by_taxonomy",
+                task=task,
+                stage=stage,
+                iteration=iter,
+                output_path=trace_output_path,
+                span_type="TOOL",
+                input={"task_id": getattr(task, "id", None), "stage": stage},
+            ) as step:
+                # Call the LLM and parse the output (==== ... ==== JSON block)
+                matched_taxo = call_llm_and_parse_with_retry(
+                    model=self.model,
+                    service=self.service,
+                    prompt=prompt,
+                    parse_fn=self.extract_taxonomy,
+                    temperature=0,
+                    max_retry=3,
+                    sleep_sec=5,
+                    verbose=verbose,
+                    log_header=custom_header,
+                    error_message=error_message,
+                    trace_output_path=trace_output_path,
+                    trace_context={
+                        "agent": "LibraryRetrieval",
+                        "operation": "quick_match_by_taxonomy",
+                        "task_id": task.id,
+                        "stage": stage,
+                        "iteration": iter,
+                    },
+                )
+                step.set_output({"matched_taxonomy_count": len(matched_taxo or {}), "matched_taxonomy": matched_taxo})
+                record_artifact("matched_taxonomy", matched_taxo, artifact_type="json", language="json", output_path=trace_output_path)
+                record_event("taxonomy_matched", {"task_id": task.id, "stage": stage, "matched_taxonomy_count": len(matched_taxo or {})}, output_path=trace_output_path)
 
         # Treat provider/parse failures as "no matched labels" so evaluation can continue.
         except Exception as err:
@@ -195,7 +211,7 @@ class LibraryRetrieval:
                 "continuing with no matched taxonomy labels."
             )
             if "content_filter" in str(err).lower() or "responsibleaipolicyviolation" in str(err).lower():
-                print("   Cause looks like Azure content filtering. Check local _llm_traces artifacts for prompt/context.")
+                print("   Cause looks like Azure content filtering. Check local _agent_traces artifacts for prompt/context.")
             traceback.print_exc()
             return {}
 
@@ -210,7 +226,8 @@ class LibraryRetrieval:
 
         if output_path:
             # Save the matched taxonomy
-            taxo_path = f"{output_path}/{stage}/matched_taxo_iter_{iter}.json"
+            stage_prefix = str(stage or "retrieval").lower()
+            taxo_path = f"{output_path}/{stage_prefix}_matched_taxo_iter_{iter}.json"
             save_log_data(matched_taxo, taxo_path)
 
             # Save the task with its matched insights
@@ -219,7 +236,7 @@ class LibraryRetrieval:
             "description": task.desc,
             "matched_insights": matched_insights
             }
-            insights_path = f"{output_path}/{stage}/matched_insights_iter_{iter}.json"
+            insights_path = f"{output_path}/{stage_prefix}_matched_insights_iter_{iter}.json"
             save_log_data(task_matched_insights, insights_path)
 
         return matched_insights
@@ -237,110 +254,115 @@ class LibraryRetrieval:
                 save_data: bool = False,
                 output_path: str = "learning"
                 ):
-        
-        if config.ablation.taxonomy:  # Enable taxonomy
-            matched_insights = self.quick_match_by_taxonomy(iter=iter, task=task, stage=stage, formulation=formulation, verbose=verbose, output_path=output_path)
-            if not matched_insights:
-                if verbose:
-                    print(f"\n   Task {task.id} : No candidates on [{stage}], skip!\n")
-                return []
-        else:
-            # When taxonomy is disabled, use all insights from the library
-            matched_insights = self.library.to_json()
-            if not matched_insights:
-                if verbose:
-                    print(f"\n   Task {task.id} : No insights in library, skip!\n")
-                return []
 
-        # if stage == "Formulation": 
-            # prompt = PROMPT_FULL_CHECK_MODEL.format(
-            #     problem_description=task.desc, 
-            #     candidate_insights=json.dumps(matched_insights)
-            #     )
-        
-        # if stage == "Program":
-        #     prompt = PROMPT_FULL_CHECK_CODE.format(
-        #         problem_description=task.desc, 
-        #         mathematical_model=formulation,
-        #         candidate_insights=json.dumps(matched_insights)
-        #         )
-        if stage == "Formulation": 
-            prompt_template = PROMPT_FULL_CHECK_MODEL
-            prompt_kwargs = {
-                "problem_description": task.desc
-            }
+        with agent_step(
+            "RetrieveInsights",
+            agent_name="LibraryRetrieval",
+            operation="retrieve_applicable_insights",
+            task=task,
+            stage=stage,
+            iteration=iter,
+            output_path=output_path,
+            span_type="TOOL",
+            input={"task_id": getattr(task, "id", None), "stage": stage, "batch_size": batch_size},
+        ) as step:
+            if config.ablation.taxonomy:  # Enable taxonomy
+                matched_insights = self.quick_match_by_taxonomy(iter=iter, task=task, stage=stage, formulation=formulation, verbose=verbose, output_path=output_path)
+                if not matched_insights:
+                    if verbose:
+                        print(f"\n   Task {task.id} : No candidates on [{stage}], skip!\n")
+                    step.set_output({"matched_insight_count": 0, "applicable_insight_count": 0})
+                    return []
+            else:
+                # When taxonomy is disabled, use all insights from the library
+                matched_insights = self.library.to_json()
+                if not matched_insights:
+                    if verbose:
+                        print(f"\n   Task {task.id} : No insights in library, skip!\n")
+                    step.set_output({"matched_insight_count": 0, "applicable_insight_count": 0})
+                    return []
 
-        elif stage == "Program":
-            prompt_template = PROMPT_FULL_CHECK_CODE
-            prompt_kwargs = {
-                "problem_description": task.desc,
-                "mathematical_model": formulation
-            }
+            if stage == "Formulation":
+                prompt_template = PROMPT_FULL_CHECK_MODEL
+                prompt_kwargs = {
+                    "problem_description": task.desc
+                }
 
-        custom_header = f"\n==========\n[Iteration {iter}] Check the applicability of insights on [{stage}] for Task {task.id}\n==========\n"
-        error_message = f"\n   Task {task.id} [{stage}]: failed to extract applicable insights after maximum attempts\n"
-        # try:
-        #     # Call the LLM and parse the output (==== ... ==== JSON block)
-        #     applicable_results = call_llm_and_parse_with_retry(
-        #         model=self.model,
-        #         service=self.service,
-        #         prompt=prompt,
-        #         # Output a list with insights or an empty list []
-        #         parse_fn=extract_json_array,
-        #         temperature=0,
-        #         max_retry=3,
-        #         sleep_sec=0.5,
-        #         verbose=verbose,
-        #         log_header=custom_header,
-        #         error_message=error_message
-        #     )
+            elif stage == "Program":
+                prompt_template = PROMPT_FULL_CHECK_CODE
+                prompt_kwargs = {
+                    "problem_description": task.desc,
+                    "mathematical_model": formulation
+                }
+            else:
+                prompt_template = PROMPT_FULL_CHECK_MODEL
+                prompt_kwargs = {"problem_description": task.desc}
 
-        # Handle malformed LLM outputs to ensure continued execution
-        # except Exception as e:
-        #     print(f"\n   [WARNING] Task {task.id} [{stage}]: Failed to parse LLM output after max retries; using candidate insights as fallback.\n")
-        #     traceback.print_exc()
-        #     applicable_results = matched_insights
+            custom_header = f"\n==========\n[Iteration {iter}] Check the applicability of insights on [{stage}] for Task {task.id}\n==========\n"
+            error_message = f"\n   Task {task.id} [{stage}]: failed to extract applicable insights after maximum attempts\n"
 
-        # Use batch processing function
-        applicable_results = self._process_insights_in_batches(
-            matched_insights=matched_insights,
-            prompt_template=prompt_template,
-            prompt_kwargs=prompt_kwargs,
-            batch_size=batch_size,
-            custom_header=custom_header,
-            error_message=error_message,
-            verbose=verbose,
-            trace_output_path=f"{output_path}/{stage}" if output_path else None,
-            trace_context={
+            applicable_results = self._process_insights_in_batches(
+                matched_insights=matched_insights,
+                prompt_template=prompt_template,
+                prompt_kwargs=prompt_kwargs,
+                batch_size=batch_size,
+                custom_header=custom_header,
+                error_message=error_message,
+                verbose=verbose,
+                trace_output_path=output_path,
+                trace_context={
+                    "agent": "LibraryRetrieval",
+                    "task_id": task.id,
+                    "stage": stage,
+                    "iteration": iter,
+                },
+            )
+            # If no insights are matched by LLM
+            if applicable_results == []:
+                print(f"\n   Task {task.id} [{stage}]: No applicable insights found in the library\n")
+
+            # Retrieve the insight list with full context for the applicable IDs
+            applicable_ids = [ins['insight_id'] for ins in applicable_results if 'insight_id' in ins]
+            applicable_insights = self.library.retrieve_insights_by_id(applicable_ids, filter_fn=filter_fn)
+            step.set_attributes({
+                "alphaopt.retrieved_insight_count": len(applicable_insights or []),
+                "alphaopt.candidate_insight_count": len(matched_insights or []),
+            })
+            step.set_output({
+                "matched_insight_count": len(matched_insights or []),
+                "applicable_insight_count": len(applicable_insights or []),
+                "applicable_insight_ids": applicable_ids,
+            })
+            record_event(
+                "insights_retrieved",
+                {
+                    "task_id": task.id,
+                    "stage": stage,
+                    "candidate_count": len(matched_insights or []),
+                    "applicable_count": len(applicable_insights or []),
+                    "applicable_ids": applicable_ids,
+                },
+                output_path=output_path,
+            )
+
+            # Save the task with its applicable insights to a json file
+            if save_data:
+                reason_map = {ins["insight_id"]: ins.get("reason", "") for ins in applicable_results if 'insight_id' in ins}
+                applicable_insights_info = [
+                    {**ins, "reason": reason_map.get(ins["insight_id"])}
+                    for ins in applicable_insights
+                ]
+                task_applicable_insights = {
                 "task_id": task.id,
-                "stage": stage,
-                "iteration": iter,
-            },
-        )
-        # If no insights are matched by LLM
-        if applicable_results == []: 
-            print(f"\n   Task {task.id} [{stage}]: No applicable insights found in the library\n")
+                "description": task.desc,
+                "applicable_insights": applicable_insights_info
+                }
+                stage_prefix = str(stage or "retrieval").lower()
+                insights_path = f"{output_path}/{stage_prefix}_applicable_insights_iter_{iter}.json"
+                save_log_data(task_applicable_insights, insights_path)
+                record_artifact("applicable_insights", task_applicable_insights, artifact_type="json", language="json", output_path=output_path)
 
-        # Retrieve the insight list with full context for the applicable IDs
-        applicable_ids = [ins['insight_id'] for ins in applicable_results if 'insight_id' in ins]
-        applicable_insights = self.library.retrieve_insights_by_id(applicable_ids, filter_fn=filter_fn)
-
-        # Save the task with its applicable insights to a json file
-        if save_data:
-            reason_map = {ins["insight_id"]: ins.get("reason", "") for ins in applicable_results if 'insight_id' in ins}
-            applicable_insights_info = [
-                {**ins, "reason": reason_map.get(ins["insight_id"])} 
-                for ins in applicable_insights
-            ]
-            task_applicable_insights = {
-            "task_id": task.id,
-            "description": task.desc,
-            "applicable_insights": applicable_insights_info
-            }
-            insights_path = f"{output_path}/{stage}/applicable_insights_iter_{iter}.json"
-            save_log_data(task_applicable_insights, insights_path)
-
-        return applicable_insights
+            return applicable_insights
 
 
     def retrieve_insights_for_diagnosis(self, 
@@ -385,7 +407,7 @@ class LibraryRetrieval:
                     verbose=verbose,
                     log_header=custom_header,
                     error_message=error_message,
-                    trace_output_path=f"{output_path}/Diagnosis" if output_path else None,
+                    trace_output_path=output_path,
                     trace_context={
                         "operation": "diagnosis_quick_match_taxonomy",
                         "task_id": task.id,
@@ -402,7 +424,7 @@ class LibraryRetrieval:
                     "continuing with no matched taxonomy labels."
                 )
                 if "content_filter" in str(err).lower() or "responsibleaipolicyviolation" in str(err).lower():
-                    print("    Cause looks like Azure content filtering. Check local _llm_traces artifacts for prompt/context.")
+                    print("    Cause looks like Azure content filtering. Check local _agent_traces artifacts for prompt/context.")
                 traceback.print_exc()
                 return {}
 
@@ -463,7 +485,7 @@ class LibraryRetrieval:
                 custom_header=custom_header,
                 error_message=error_message,
                 verbose=verbose,
-                trace_output_path=f"{output_path}/Diagnosis" if output_path else None,
+                trace_output_path=output_path,
                 trace_context={
                     "task_id": task.id,
                     "stage": "Diagnosis",
@@ -485,7 +507,7 @@ class LibraryRetrieval:
             # Save data temporarily
             if save_data:
                 # Save the matched taxonomy
-                taxo_path = f"{output_path}/Diagnosis/matched_taxo_iter_{iter}_idx_{idx}.json"
+                taxo_path = f"{output_path}/diagnosis_matched_taxo_iter_{iter}_idx_{idx}.json"
                 save_log_data(issue_matched_taxo, taxo_path)
 
                 # Save the task with its matched insights
@@ -494,7 +516,7 @@ class LibraryRetrieval:
                 "description": task.desc,
                 "matched_insights": matched_insights
                 }
-                matched_insights_path = f"{output_path}/Diagnosis/matched_insights_iter_{iter}_idx_{idx}.json"
+                matched_insights_path = f"{output_path}/diagnosis_matched_insights_iter_{iter}_idx_{idx}.json"
                 with open(matched_insights_path, "w") as fout:
                     json.dump(task_matched_insights, fout, indent=2, ensure_ascii=False)
                 
@@ -516,7 +538,7 @@ class LibraryRetrieval:
                 "description": task.desc,
                 "applicable_insights": applicable_insights_info
                 }
-                applicable_insights_path = f"{output_path}/Diagnosis/applicable_insights_iter_{iter}_idx_{idx}.json"
+                applicable_insights_path = f"{output_path}/diagnosis_applicable_insights_iter_{iter}_idx_{idx}.json"
                 save_log_data(task_applicable_insights, applicable_insights_path)
 
         return issues_applicable_insights

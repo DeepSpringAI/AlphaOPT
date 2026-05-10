@@ -15,12 +15,16 @@ from src.resume_state import now_timestamp, save_json_state
 from src.laminar_tracing import (
     add_span_tags,
     current_trace_id,
+    flush_laminar,
+    init_laminar_from_env,
     record_exception as laminar_record_exception,
     record_trace_index,
     set_span_attributes,
     set_span_output,
+    set_trace_metadata,
     trace_span,
 )
+from src.agent_tracing import objective_attributes, record_event
 
 
 def self_verify_merged_insights(iter, task, llm_opt, new_insights, all_merged_insights, prev_insights):
@@ -89,13 +93,15 @@ def run_library_online_learning(
         Return: (new insights, all_attempts_optimal, is_execution, is_verify)
         """
         nonlocal iter_self_verify_total, iter_self_verify_success_tasks, iter_self_verify_full_retrieval_tasks, iter_self_verify_partial_retrieval_tasks
+        dataset_name = getattr(config, "dataset", None) or ",".join(map(str, getattr(config, "datasets", []) or []))
         with trace_span(
-            "alphaopt.training.online.task",
+            "alphaopt.task",
             input={"task_id": task.id, "description": task.desc, "ground_truth": task.ground_truth},
-            tags=["alphaopt", "train", "online-learning", f"iter-{iter}"],
+            tags=["alphaopt", "train", "online-learning", f"iter-{iter}", f"dataset:{dataset_name}" if dataset_name else ""],
             metadata={
                 "mode": "training",
                 "phase": "online_learning",
+                "dataset": dataset_name,
                 "task_id": task.id,
                 "iteration": iter,
                 "output_path": train_output_path,
@@ -103,11 +109,24 @@ def run_library_online_learning(
             attributes={
                 "alphaopt.mode": "training",
                 "alphaopt.phase": "online_learning",
+                "alphaopt.dataset": dataset_name,
                 "alphaopt.task_id": str(task.id),
                 "alphaopt.iteration": int(iter),
+                "alphaopt.ground_truth_objective": task.ground_truth,
             },
+            session_id=f"training:{config.output_folder}:iter-{iter}",
         ) as root_span:
             try:
+                set_trace_metadata(
+                    {
+                        "mode": "training",
+                        "phase": "online_learning",
+                        "dataset": dataset_name,
+                        "task_id": task.id,
+                        "iteration": iter,
+                        "output_path": train_output_path,
+                    }
+                )
                 result = _train_worker_impl(task, taxo_snapshot, train_output_path, temp_library, lock)
                 new_insights, all_attempts_optimal, is_execution, is_verify, is_self_explore, first_attempt_optimal = result
                 status = "optimal" if first_attempt_optimal else "not_optimal"
@@ -170,6 +189,11 @@ def run_library_online_learning(
         #* Try generating program/solution up to 5 times
         for k in range(1, params.max_solution_attempts + 1):
             #* Retrieve insights (if any) and generate formulation and program
+            record_event(
+                "solution_attempt_started",
+                {"task_id": task.id, "iteration": iter, "attempt": k},
+                output_path=train_output_path,
+            )
             prev_insights, candidate_formulation, candidate_program, output, runnable, is_time_out = generate_solution_with_retrieval(
                     iter, task, library, llm_retri, llm_opt, 
                     retrieved_insights=prev_insights,
@@ -196,6 +220,19 @@ def run_library_online_learning(
 
             # Check optimality
             is_optimal, output_status, feedback = check_optimality(task=task, output=output, runnable=runnable, is_time_out=is_time_out)
+            record_event(
+                "solution_attempt_finished",
+                {
+                    "task_id": task.id,
+                    "iteration": iter,
+                    "attempt": k,
+                    "status": output_status,
+                    "runnable": bool(runnable),
+                    "timeout": bool(is_time_out),
+                    **objective_attributes(output=output, ground_truth=task.ground_truth, matched=is_optimal),
+                },
+                output_path=train_output_path,
+            )
 
             status_lst.append(output_status)
 
@@ -285,7 +322,8 @@ def run_library_online_learning(
                                     condition_failed=condition_failed,
                                     library=temp_library,
                                     candidate_formulation=candidate_formulation,
-                                    verbose=False
+                                    verbose=False,
+                                    output_path=train_output_path,
                                 )
                                 new_program_ins.append(modified_ins)
                                 modified_insight_ids.add(ins_id)  # Track original insight_id that was modified
@@ -327,6 +365,19 @@ def run_library_online_learning(
                             candidate_formulation=candidate_formulation,
                             save_data=True,
                             output_path=train_output_path
+                        )
+                        record_event(
+                            "insight_verification_finished",
+                            {
+                                "task_id": task.id,
+                                "iteration": iter,
+                                "attempt": attempt_num,
+                                "stage": "Program",
+                                "is_verify": bool(is_verify),
+                                "task_success": bool(task_success),
+                                "verified_count": len(verified_insights or []),
+                            },
+                            output_path=train_output_path,
                         )
 
                         # Count this self-verify attempt
@@ -401,7 +452,18 @@ def run_library_online_learning(
                     # Update new feedback and program if debugged
                     candidate_program = corrected_program or candidate_program
                     feedback = new_feedback or feedback
-                    is_optimal, gold_standard_program = llm_opt.self_explore(task, candidate_program, feedback)
+                    is_optimal, gold_standard_program = llm_opt.self_explore(
+                        task,
+                        candidate_program,
+                        feedback,
+                        save_data=True,
+                        output_path=train_output_path,
+                    )
+                    record_event(
+                        "self_explore_finished",
+                        {"task_id": task.id, "iteration": iter, "is_optimal": bool(is_optimal)},
+                        output_path=train_output_path,
+                    )
                     if is_optimal:
                         task.correct_program = gold_standard_program
                         is_self_explore = True
@@ -441,7 +503,8 @@ def run_library_online_learning(
                                     condition_failed=condition_failed,
                                     library=temp_library,
                                     candidate_formulation=candidate_formulation,
-                                    verbose=False
+                                    verbose=False,
+                                    output_path=train_output_path,
                                 )
                                 new_formu_ins.append(modified_ins)
                                 modified_insight_ids.add(ins_id)  # Track original insight_id that was modified
@@ -483,6 +546,19 @@ def run_library_online_learning(
                         candidate_formulation=candidate_formulation,
                         save_data=True,
                         output_path=train_output_path
+                    )
+                    record_event(
+                        "insight_verification_finished",
+                        {
+                            "task_id": task.id,
+                            "iteration": iter,
+                            "attempt": attempt_num,
+                            "stage": "Formulation",
+                            "is_verify": bool(is_verify),
+                            "task_success": bool(task_success),
+                            "verified_count": len(verified_insights or []),
+                        },
+                        output_path=train_output_path,
                     )
                     iter_self_verify_total += 1
                     
@@ -546,7 +622,22 @@ def run_library_online_learning(
 
         if len(task_new_insights) > 1:
             print(f"Task {task.id} has {len(task_new_insights)} insights to be merged!")
-            task_merged_insights = llm_ins.conduct_insight_merge(candidate_insights=task_new_insights, target=f"Task {task.id}", verbose=False)
+            task_merged_insights = llm_ins.conduct_insight_merge(
+                candidate_insights=task_new_insights,
+                target=f"Task {task.id}",
+                verbose=False,
+                output_path=train_output_path,
+            )
+            record_event(
+                "insight_merge_finished",
+                {
+                    "task_id": task.id,
+                    "iteration": iter,
+                    "candidate_count": len(task_new_insights),
+                    "merged_count": len(task_merged_insights or []),
+                },
+                output_path=train_output_path,
+            )
         else:
             task_merged_insights = []
 
@@ -668,7 +759,12 @@ def run_library_online_learning(
                     #* Conduct insight merge and get merged insight(s) 
                     for idx, ins in enumerate(batch_new_insights):
                         ins["insight_id"] = idx
-                    merged_batch_new_insights = llm_ins.conduct_insight_merge(candidate_insights=batch_new_insights, target=f"Batch {batch_idx}", verbose=True) 
+                    merged_batch_new_insights = llm_ins.conduct_insight_merge(
+                        candidate_insights=batch_new_insights,
+                        target=f"Batch {batch_idx}",
+                        verbose=True,
+                        output_path=paths.train_output_dir,
+                    )
                     num_all_merged = len(merged_batch_new_insights)
                     total_num_all_merged += num_all_merged
                 else:
@@ -735,7 +831,8 @@ def run_library_online_learning(
                     merged_insights, _, parent_ids = llm_ins.conduct_insight_online_merge(
                         new_insight=[new_insight],  # Wrap in list as expected by the method
                         library=library,
-                        verbose=True
+                        verbose=True,
+                        output_path=paths.train_output_dir,
                     )
                     
                     # If no merge occurred, add original insight directly
@@ -986,6 +1083,11 @@ if __name__ == "__main__":
     from src.config import load_train_config
 
     config = load_train_config()
+    init_laminar_from_env(
+        mode="training",
+        config_path=os.getenv("ALPHAOPT_TRAIN_CONFIG"),
+        metadata={"phase": "online_learning"},
+    )
 
     # Generate a timestamp and append it to output_folder
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -1038,3 +1140,4 @@ if __name__ == "__main__":
 
     # Count time cost
     total_duration = cal_time_cost(start_time, f'The library online learning process')
+    flush_laminar()

@@ -15,11 +15,14 @@ from src.laminar_tracing import (
     add_span_tags,
     current_trace_id,
     deserialize_span_context,
+    flush_laminar,
+    init_laminar_from_env,
     record_exception as laminar_record_exception,
     record_trace_index,
     serialize_current_span_context,
     set_span_attributes,
     set_span_output,
+    set_trace_metadata,
     trace_span,
 )
 
@@ -47,13 +50,15 @@ def run_library_diagnosis(
         Return: (new insights, is_success, is_execution, is_verify, is_diagnosis)
         """
         nonlocal iter_self_verify_total, iter_self_verify_success_tasks, iter_self_verify_full_retrieval_tasks, iter_self_verify_partial_retrieval_tasks
+        dataset_name = getattr(paths, "dataset", None) or getattr(params, "dataset", None)
         with trace_span(
-            "alphaopt.training.diagnosis.task",
+            "alphaopt.task",
             input={"task_id": task.id, "description": task.desc, "ground_truth": task.ground_truth},
-            tags=["alphaopt", "train", "diagnosis", f"iter-{iter}"],
+            tags=["alphaopt", "train", "diagnosis", f"iter-{iter}", f"dataset:{dataset_name}" if dataset_name else ""],
             metadata={
                 "mode": "training",
                 "phase": "diagnosis",
+                "dataset": dataset_name,
                 "task_id": task.id,
                 "iteration": iter,
                 "output_path": train_output_path,
@@ -61,11 +66,23 @@ def run_library_diagnosis(
             attributes={
                 "alphaopt.mode": "training",
                 "alphaopt.phase": "diagnosis",
+                "alphaopt.dataset": dataset_name,
                 "alphaopt.task_id": str(task.id),
                 "alphaopt.iteration": int(iter),
             },
+            session_id=f"diagnosis:{getattr(paths, 'train_output_dir', 'training')}:iter-{iter}",
         ) as root_span:
             try:
+                set_trace_metadata(
+                    {
+                        "mode": "training",
+                        "phase": "diagnosis",
+                        "dataset": dataset_name,
+                        "task_id": task.id,
+                        "iteration": iter,
+                        "output_path": train_output_path,
+                    }
+                )
                 result = _train_worker_impl(task, train_output_path)
                 new_insights, is_success, is_execution, is_verify, is_diagnosis = result
                 trace_id = current_trace_id()
@@ -286,7 +303,8 @@ def run_library_diagnosis(
                                     condition_failed=condition_failed,
                                     library=temp_library,
                                     candidate_formulation=candidate_formulation,
-                                    verbose=False
+                                    verbose=False,
+                                    output_path=train_output_path,
                                 )
                                 new_program_ins.append(modified_ins)
                                 modified_insight_ids.add(ins_id)  # Track original insight_id that was modified
@@ -473,7 +491,8 @@ def run_library_diagnosis(
                                     condition_failed=condition_failed,
                                     library=temp_library,
                                     candidate_formulation=candidate_formulation,
-                                    verbose=False
+                                    verbose=False,
+                                    output_path=train_output_path,
                                 )
                                 new_formu_ins.append(modified_ins)
                                 modified_insight_ids.add(ins_id)  # Track original insight_id that was modified
@@ -714,7 +733,8 @@ def run_library_diagnosis(
                         merged_insights, merged_task_to_iter, parent_ids = llm_ins.conduct_insight_online_merge(
                             new_insight=[new_insight],
                             library=lib_snapshot,
-                            verbose=True
+                            verbose=True,
+                            output_path=train_output_path,
                         )
         
                         # If no merge occurred, add original insight directly
@@ -1074,6 +1094,11 @@ if __name__ == "__main__":
     from src.config import load_train_config
 
     config = load_train_config()
+    init_laminar_from_env(
+        mode="training",
+        config_path=os.getenv("ALPHAOPT_TRAIN_CONFIG"),
+        metadata={"phase": "diagnosis"},
+    )
 
     #* Generate a timestamp and append it to output_folder
     # ts = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -1135,3 +1160,4 @@ if __name__ == "__main__":
 
     # Count time cost
     total_duration = cal_time_cost(start_time, f'The library diagnosis process')
+    flush_laminar()

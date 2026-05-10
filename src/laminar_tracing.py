@@ -1,4 +1,5 @@
 import contextlib
+import contextvars
 import hashlib
 import json
 import os
@@ -16,6 +17,21 @@ _INDEX_LOCK = threading.Lock()
 _INITIALIZED = False
 _ENABLED = False
 _ENV_LOADED = False
+_CURRENT_METADATA: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextVar(
+    "alphaopt_laminar_metadata", default={}
+)
+_CURRENT_TAGS: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
+    "alphaopt_laminar_tags", default=()
+)
+_CURRENT_LABELS: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
+    "alphaopt_laminar_labels", default=()
+)
+_CURRENT_SESSION_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "alphaopt_laminar_session_id", default=None
+)
+_CURRENT_USER_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "alphaopt_laminar_user_id", default=None
+)
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -81,6 +97,62 @@ def _compact(data: dict[str, Any] | None) -> dict[str, Any]:
         key = getattr(k, "value", k)
         out[str(key)] = _primitive(v)
     return out
+
+
+def _merge_tags(*tag_groups: list[str] | tuple[str, ...] | None) -> list[str]:
+    seen: set[str] = set()
+    merged: list[str] = []
+    for group in tag_groups:
+        for tag in group or []:
+            tag_str = str(tag)
+            if not tag_str or tag_str in seen:
+                continue
+            seen.add(tag_str)
+            merged.append(tag_str)
+    return merged
+
+
+@contextlib.contextmanager
+def trace_context(
+    *,
+    metadata: dict[str, Any] | None = None,
+    tags: list[str] | tuple[str, ...] | None = None,
+    labels: list[str] | tuple[str, ...] | None = None,
+    session_id: str | None = None,
+    user_id: str | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Temporarily inherit Laminar context for nested AlphaOPT spans."""
+    merged_metadata = _compact({**_CURRENT_METADATA.get(), **(metadata or {})})
+    merged_tags = tuple(_merge_tags(_CURRENT_TAGS.get(), tags))
+    merged_labels = tuple(_merge_tags(_CURRENT_LABELS.get(), labels))
+    resolved_session_id = session_id or _CURRENT_SESSION_ID.get()
+    resolved_user_id = user_id or _CURRENT_USER_ID.get()
+
+    token_meta = _CURRENT_METADATA.set(merged_metadata)
+    token_tags = _CURRENT_TAGS.set(merged_tags)
+    token_labels = _CURRENT_LABELS.set(merged_labels)
+    token_session = _CURRENT_SESSION_ID.set(resolved_session_id)
+    token_user = _CURRENT_USER_ID.set(resolved_user_id)
+    try:
+        yield merged_metadata
+    finally:
+        _CURRENT_METADATA.reset(token_meta)
+        _CURRENT_TAGS.reset(token_tags)
+        _CURRENT_LABELS.reset(token_labels)
+        _CURRENT_SESSION_ID.reset(token_session)
+        _CURRENT_USER_ID.reset(token_user)
+
+
+def current_trace_context() -> dict[str, Any]:
+    return dict(_CURRENT_METADATA.get())
+
+
+def current_session_id() -> str | None:
+    return _CURRENT_SESSION_ID.get()
+
+
+def current_user_id() -> str | None:
+    return _CURRENT_USER_ID.get()
 
 
 def _config_sha256(config_path: str | None) -> str | None:
@@ -213,25 +285,59 @@ def trace_span(
     input: Any = None,
     span_type: str = "DEFAULT",
     tags: list[str] | None = None,
+    labels: list[str] | None = None,
+    user_id: str | None = None,
+    session_id: str | None = None,
     metadata: dict[str, Any] | None = None,
     attributes: dict[str, Any] | None = None,
     parent_span_context: Any = None,
 ) -> Iterator[Any]:
+    inherited_metadata = _CURRENT_METADATA.get()
+    inherited_tags = _CURRENT_TAGS.get()
+    inherited_labels = _CURRENT_LABELS.get()
+    metadata_payload = _compact({**inherited_metadata, **(metadata or {})})
+    tag_payload = _merge_tags(inherited_tags, tags)
+    label_payload = _merge_tags(inherited_labels, labels)
+    resolved_session_id = session_id or _CURRENT_SESSION_ID.get()
+    resolved_user_id = user_id or _CURRENT_USER_ID.get()
+
+    token_meta = _CURRENT_METADATA.set(metadata_payload)
+    token_tags = _CURRENT_TAGS.set(tuple(tag_payload))
+    token_labels = _CURRENT_LABELS.set(tuple(label_payload))
+    token_session = _CURRENT_SESSION_ID.set(resolved_session_id)
+    token_user = _CURRENT_USER_ID.set(resolved_user_id)
     if not laminar_enabled() or not _ENABLED:
-        yield None
+        try:
+            yield None
+        finally:
+            _CURRENT_METADATA.reset(token_meta)
+            _CURRENT_TAGS.reset(token_tags)
+            _CURRENT_LABELS.reset(token_labels)
+            _CURRENT_SESSION_ID.reset(token_session)
+            _CURRENT_USER_ID.reset(token_user)
         return
     from lmnr import Laminar
 
-    with Laminar.start_as_current_span(
-        name,
-        input=input,
-        span_type=span_type,
-        tags=tags,
-        metadata=_compact(metadata),
-        attributes=_compact(attributes),
-        parent_span_context=parent_span_context,
-    ) as span:
-        yield span
+    try:
+        with Laminar.start_as_current_span(
+            name,
+            input=input,
+            span_type=span_type,
+            labels=label_payload or None,
+            tags=tag_payload or None,
+            user_id=resolved_user_id,
+            session_id=resolved_session_id,
+            metadata=metadata_payload,
+            attributes=_compact(attributes),
+            parent_span_context=parent_span_context,
+        ) as span:
+            yield span
+    finally:
+        _CURRENT_METADATA.reset(token_meta)
+        _CURRENT_TAGS.reset(token_tags)
+        _CURRENT_LABELS.reset(token_labels)
+        _CURRENT_SESSION_ID.reset(token_session)
+        _CURRENT_USER_ID.reset(token_user)
 
 
 def set_span_output(span: Any, output: Any) -> None:
@@ -266,6 +372,50 @@ def record_exception(span: Any, exc: BaseException) -> None:
         return
     try:
         span.record_exception(exc)
+    except Exception:
+        pass
+
+
+def record_event(name: str, attributes: dict[str, Any] | None = None) -> None:
+    if not laminar_enabled() or not _ENABLED:
+        return
+    try:
+        from lmnr import Laminar
+
+        Laminar.event(name, attributes=_compact(attributes))
+    except Exception:
+        pass
+
+
+def set_trace_metadata(metadata: dict[str, Any] | None) -> None:
+    if not laminar_enabled() or not _ENABLED:
+        return
+    try:
+        from lmnr import Laminar
+
+        Laminar.set_trace_metadata(_compact(metadata))
+    except Exception:
+        pass
+
+
+def set_trace_session_id(session_id: str | None) -> None:
+    if not session_id or not laminar_enabled() or not _ENABLED:
+        return
+    try:
+        from lmnr import Laminar
+
+        Laminar.set_trace_session_id(str(session_id))
+    except Exception:
+        pass
+
+
+def set_trace_user_id(user_id: str | None) -> None:
+    if not user_id or not laminar_enabled() or not _ENABLED:
+        return
+    try:
+        from lmnr import Laminar
+
+        Laminar.set_trace_user_id(str(user_id))
     except Exception:
         pass
 

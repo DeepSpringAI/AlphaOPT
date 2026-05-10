@@ -18,6 +18,7 @@ from .laminar_tracing import (
     set_span_output,
     trace_span,
 )
+from .agent_tracing import agent_step, current_agent_context, current_step_id, record_artifact, record_event
 
 #* Configure
 from .config import load_train_config
@@ -446,6 +447,11 @@ def _prompt_to_text(prompt: Any) -> str:
     return str(prompt or "")
 
 
+def _prompt_to_chat_input(prompt: Any) -> dict[str, Any]:
+    messages = prompt if isinstance(prompt, list) else [{"role": "user", "content": prompt or ""}]
+    return {"messages": messages}
+
+
 def _extract_suspect_terms(text: str, max_terms: int = 20) -> list[str]:
     """
     Heuristic term extractor to help identify potentially moderated wording.
@@ -533,7 +539,7 @@ def _write_llm_error_trace(
     """
     Persist a compact local trace artifact for failed LLM calls.
     """
-    trace_dir = Path(trace_output_path) / "_llm_traces"
+    trace_dir = Path(trace_output_path) / "_agent_traces" / "llm"
     trace_dir.mkdir(parents=True, exist_ok=True)
 
     prompt_hash = hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
@@ -741,7 +747,10 @@ def _get_trace_session_dir() -> tuple[Path, str]:
     global _TRACE_SESSION_DIR, _TRACE_SESSION_RUN_ID
     with _TRACE_SESSION_LOCK:
         if _TRACE_SESSION_DIR is None or _TRACE_SESSION_RUN_ID is None:
-            base = Path(os.getenv("ALPHAOPT_TRACE_DIR", "./traces"))
+            trace_dir = os.getenv("ALPHAOPT_TRACE_DIR")
+            if not trace_dir:
+                raise RuntimeError("ALPHAOPT_TRACE_DIR is not set for fallback local tracing.")
+            base = Path(trace_dir)
             ts = time.strftime("%Y%m%d-%H%M%S")
             run_id = f"{ts}-pid{os.getpid()}-{secrets.token_hex(4)}"
             session_dir = base / run_id
@@ -761,6 +770,11 @@ def _resolve_trace_output_path(trace_output_path: str | None) -> tuple[str | Non
         return None, None
     if trace_output_path:
         return trace_output_path, None
+    context_output_path = current_agent_context().get("output_path")
+    if context_output_path:
+        return str(context_output_path), None
+    if not os.getenv("ALPHAOPT_TRACE_DIR"):
+        return None, None
     session_dir, run_id = _get_trace_session_dir()
     return str(session_dir), run_id
 
@@ -794,7 +808,7 @@ def _write_llm_io_artifacts(
     """
     Persist prompt/response artifacts for each LLM invocation.
     """
-    trace_dir = Path(trace_output_path) / "_llm_traces"
+    trace_dir = Path(trace_output_path) / "_agent_traces" / "llm"
     trace_dir.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y%m%d-%H%M%S")
     task_id = str(meta.get("task_id", "unknown"))
@@ -843,7 +857,7 @@ def _write_otlp_friendly_span(
     Write one local OTLP-friendly span record as a JSON line.
     This shape maps directly onto common OTLP span fields.
     """
-    trace_dir = Path(trace_output_path) / "_llm_traces"
+    trace_dir = Path(trace_output_path) / "_agent_traces" / "llm"
     trace_dir.mkdir(parents=True, exist_ok=True)
     use_gzip = _env_bool("ALPHAOPT_TRACE_SPANS_GZIP", False)
     out_path = trace_dir / ("otlp_spans.jsonl.gz" if use_gzip else "otlp_spans.jsonl")
@@ -910,19 +924,59 @@ def call_llm_and_parse_with_retry(
     Send a chat prompt to OpenAI or Gemini automatically detected by `model`,
     retry on failure, and parse the raw text with `parse_fn`.
     """
-    vendor, client = _build_client(model, service)
-    resolved_reasoning_effort = _resolve_reasoning_effort(reasoning_effort)
-    request_reasoning_effort = (
-        resolved_reasoning_effort if _supports_reasoning_effort(vendor, model) else None
-    )
+    if current_step_id() is None:
+        inferred_ctx = _extract_trace_context_from_log_header(log_header)
+        inherited_ctx = current_agent_context()
+        wrapper_ctx = {**inherited_ctx, **inferred_ctx, **(trace_context or {})}
+        operation_name = str(wrapper_ctx.get("operation") or _callable_name(parse_fn))
+        agent_name = str(wrapper_ctx.get("agent") or wrapper_ctx.get("module") or "LLM")
+        with agent_step(
+            "agent.step",
+            agent_name=agent_name,
+            operation=operation_name,
+            task_id=wrapper_ctx.get("task_id"),
+            dataset=wrapper_ctx.get("dataset") or wrapper_ctx.get("alphaopt.dataset"),
+            stage=wrapper_ctx.get("stage"),
+            attempt=wrapper_ctx.get("attempt"),
+            iteration=wrapper_ctx.get("iteration"),
+            output_path=trace_output_path or wrapper_ctx.get("output_path"),
+            input={"operation": operation_name, "model": model, "service": service},
+            metadata=wrapper_ctx,
+        ) as step:
+            try:
+                result = call_llm_and_parse_with_retry(
+                    model=model,
+                    service=service,
+                    prompt=prompt,
+                    parse_fn=parse_fn,
+                    temperature=temperature,
+                    reasoning_effort=reasoning_effort,
+                    max_retry=max_retry,
+                    sleep_sec=sleep_sec,
+                    verbose=verbose,
+                    log_header=log_header,
+                    error_message=error_message,
+                    trace_context=trace_context,
+                    trace_output_path=trace_output_path,
+                )
+                step.set_output({"status": "ok", "operation": operation_name, "result_type": type(result).__name__})
+                return result
+            except Exception as exc:
+                step.set_output({"status": "error", "operation": operation_name, "error": str(exc)[:1000]})
+                raise
+
     call_trace_id = _new_trace_id_hex()
     resolved_trace_output_path, resolved_run_id = _resolve_trace_output_path(trace_output_path)
     inferred_ctx = _extract_trace_context_from_log_header(log_header)
+    inherited_trace_context = current_agent_context()
     base_trace_context = {
+        **inherited_trace_context,
         **inferred_ctx,
         **(trace_context or {}),
     }
     experiment_meta = _get_experiment_metadata()
+    for key, value in experiment_meta.items():
+        base_trace_context.setdefault(key, value)
     # Langfuse-style conventional fields when available.
     if "session_id" not in base_trace_context and resolved_run_id:
         base_trace_context["session_id"] = resolved_run_id
@@ -932,6 +986,36 @@ def call_llm_and_parse_with_retry(
         base_trace_context["observation_type"] = "generation"
     if resolved_run_id and "run_id" not in base_trace_context:
         base_trace_context["run_id"] = resolved_run_id
+
+    try:
+        vendor, client = _build_client(model, service)
+    except Exception as setup_err:
+        setup_info = _classify_llm_error(setup_err)
+        record_event(
+            "llm_request_setup_failed",
+            {
+                "model": model,
+                "service": service,
+                "error_type": setup_info["kind"],
+                "error_repr": setup_info["error_repr"],
+                **base_trace_context,
+            },
+            output_path=resolved_trace_output_path,
+        )
+        record_artifact(
+            "llm_request_setup_error",
+            setup_info["error_repr"],
+            artifact_type="stderr",
+            language="text",
+            output_path=resolved_trace_output_path,
+            metadata={"model": model, "service": service, **base_trace_context},
+        )
+        raise
+
+    resolved_reasoning_effort = _resolve_reasoning_effort(reasoning_effort)
+    request_reasoning_effort = (
+        resolved_reasoning_effort if _supports_reasoning_effort(vendor, model) else None
+    )
 
     def _send_request() -> tuple[str, dict]:
         """
@@ -1093,15 +1177,27 @@ def call_llm_and_parse_with_retry(
         prompt_sha = hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
         parser_name = _callable_name(parse_fn)
         operation_name = str(base_trace_context.get("operation", parser_name))
+        call_meta: dict[str, Any] = {}
+        lmnr_span = None
 
         if log_header is not None:
             if verbose: print(log_header)
         try:
             with trace_span(
                 "llm.call",
-                input=prompt,
+                input=_prompt_to_chat_input(prompt),
                 span_type="LLM",
-                tags=["alphaopt", "llm", str(operation_name), str(vendor), str(model)],
+                tags=[
+                    "alphaopt",
+                    "llm",
+                    str(operation_name),
+                    str(vendor),
+                    str(model),
+                    f"dataset:{base_trace_context.get('dataset')}" if base_trace_context.get("dataset") else "",
+                    f"task:{base_trace_context.get('task_id')}" if base_trace_context.get("task_id") else "",
+                    f"agent:{base_trace_context.get('agent')}" if base_trace_context.get("agent") else "",
+                    f"stage:{base_trace_context.get('stage')}" if base_trace_context.get("stage") else "",
+                ],
                 metadata=base_trace_context,
                 attributes={
                     "model_name": model,
@@ -1120,6 +1216,34 @@ def call_llm_and_parse_with_retry(
             ) as lmnr_span:
                 t0 = time.time()
                 if verbose: print(f"[Attempt {attempt}/{max_retry}]\n")
+                record_event(
+                    "llm_request_started",
+                    {
+                        "operation": operation_name,
+                        "provider": vendor,
+                        "model": model,
+                        "attempt": attempt,
+                        "task_id": base_trace_context.get("task_id"),
+                        "stage": base_trace_context.get("stage"),
+                        "prompt_sha256": prompt_sha,
+                    },
+                    output_path=resolved_trace_output_path,
+                )
+                record_artifact(
+                    f"{operation_name}_attempt_{attempt}_prompt",
+                    prompt_text,
+                    artifact_type="text",
+                    language="text",
+                    output_path=resolved_trace_output_path,
+                    metadata={
+                        "operation": operation_name,
+                        "provider": vendor,
+                        "model": model,
+                        "attempt": attempt,
+                        **base_trace_context,
+                    },
+                    max_chars=_env_int("ALPHAOPT_AGENT_TRACE_MAX_PROMPT_CHARS", 24000, 0),
+                )
 
                 raw_text, call_meta = _send_request()
                 if verbose:
@@ -1129,6 +1253,22 @@ def call_llm_and_parse_with_retry(
                 if verbose: print(f"Done in {resp_time:.2f}s")
 
                 set_span_output(lmnr_span, raw_text)
+                record_artifact(
+                    f"{operation_name}_attempt_{attempt}_response",
+                    raw_text,
+                    artifact_type="markdown",
+                    language="markdown",
+                    output_path=resolved_trace_output_path,
+                    metadata={
+                        "operation": operation_name,
+                        "provider": vendor,
+                        "model": model,
+                        "attempt": attempt,
+                        "latency_ms": round(resp_time * 1000.0, 3),
+                        **base_trace_context,
+                    },
+                    max_chars=_env_int("ALPHAOPT_AGENT_TRACE_MAX_RESPONSE_CHARS", 24000, 0),
+                )
                 set_span_attributes(
                     lmnr_span,
                     llm_attributes(
@@ -1168,6 +1308,30 @@ def call_llm_and_parse_with_retry(
                         print(f"\n[Tracing warning] failed to persist LLM I/O artifacts: {io_err}")
 
                 result = parse_fn(raw_text)
+                set_span_attributes(
+                    lmnr_span,
+                    {
+                        "alphaopt.parse.status": "ok",
+                        "alphaopt.parser": parser_name,
+                        "alphaopt.parsed_result_type": type(result).__name__,
+                    },
+                )
+                record_event(
+                    "llm_response_parsed",
+                    {
+                        "operation": operation_name,
+                        "parser": parser_name,
+                        "provider": vendor,
+                        "model": model,
+                        "attempt": attempt,
+                        "latency_ms": round(resp_time * 1000.0, 3),
+                        "prompt_tokens": call_meta.get("usage_prompt_tokens"),
+                        "completion_tokens": call_meta.get("usage_completion_tokens"),
+                        "task_id": base_trace_context.get("task_id"),
+                        "stage": base_trace_context.get("stage"),
+                    },
+                    output_path=resolved_trace_output_path,
+                )
                 if resolved_trace_output_path and _should_write_span(ok=True):
                     try:
                         _write_otlp_friendly_span(
@@ -1220,18 +1384,35 @@ def call_llm_and_parse_with_retry(
 
         except Exception as err:
             try:
-                laminar_record_exception(lmnr_span if "lmnr_span" in locals() else None, err)
+                laminar_record_exception(lmnr_span, err)
                 set_span_attributes(
-                    lmnr_span if "lmnr_span" in locals() else None,
+                    lmnr_span,
                     {
                         "status_message": "error",
                         "error_type": _classify_llm_error(err).get("kind"),
+                        "alphaopt.parse.status": "error",
+                        "alphaopt.parser": parser_name,
                     },
                 )
-                add_span_tags(lmnr_span if "lmnr_span" in locals() else None, ["error"])
+                add_span_tags(lmnr_span, ["error"])
             except Exception:
                 pass
             err_info = _classify_llm_error(err)
+            record_event(
+                "llm_request_failed",
+                {
+                    "operation": operation_name,
+                    "parser": parser_name,
+                    "provider": vendor,
+                    "model": model,
+                    "attempt": attempt,
+                    "error_type": err_info["kind"],
+                    "status_code": err_info["status_code"],
+                    "task_id": base_trace_context.get("task_id"),
+                    "stage": base_trace_context.get("stage"),
+                },
+                output_path=resolved_trace_output_path,
+            )
             trace_files: dict | None = None
             span_path = None
             io_paths = None
