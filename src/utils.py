@@ -84,6 +84,19 @@ class LLMTransientError(BaseException):
         self.error_info = error_info or {}
 
 
+class LLMContentFilterError(BaseException):
+    """
+    Raised when a provider content policy blocks a request.
+
+    This is not a task failure and should not be silently converted to empty
+    retrieval/generation output.
+    """
+
+    def __init__(self, message: str, *, error_info: dict | None = None):
+        super().__init__(message)
+        self.error_info = error_info or {}
+
+
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -1605,6 +1618,8 @@ def call_llm_and_parse_with_retry(
                 if err_info["is_content_filter"]:
                     detail += f"\nContent filter details: {err_info['content_filter_result']}"
                 message = (error_message or detail) + detail if error_message else detail
+                if err_info["is_content_filter"]:
+                    raise LLMContentFilterError(message, error_info=err_info) from err
                 if is_transient:
                     raise LLMTransientError(message, error_info=err_info) from err
                 raise RuntimeError(message) from err

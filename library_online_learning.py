@@ -9,7 +9,7 @@ from threading import Lock
 from itertools import combinations
 
 from src.dataloader import DataLoader 
-from src.utils import LLMTransientError, cal_time_cost, get_token_usage
+from src.utils import LLMContentFilterError, LLMTransientError, cal_time_cost, get_token_usage
 from src.train_eval_utils import *
 from src.resume_state import now_timestamp, save_json_state
 from src.laminar_tracing import (
@@ -717,17 +717,22 @@ def run_library_online_learning(
                 idx, task = futures[future]
                 try:
                     new_insights, all_attempts_optimal, is_execution, is_verify, is_self_explore, first_attempt_optimal = future.result()
-                except LLMTransientError:
+                except (LLMTransientError, LLMContentFilterError) as exc:
                     for pending_future in futures:
                         if pending_future is not future:
                             pending_future.cancel()
                     if resume_state is not None and resume_state_path:
+                        halted_status = (
+                            "halted_provider_content_filter"
+                            if isinstance(exc, LLMContentFilterError)
+                            else "halted_transient_connection_error"
+                        )
                         online_state = resume_state.setdefault("online_learning", {})
-                        online_state["status"] = "halted_transient_connection_error"
+                        online_state["status"] = halted_status
                         online_state["next_batch_start"] = int(start)
                         resume_state["current_phase"] = "online_learning"
                         resume_state["current_iter"] = int(iter)
-                        resume_state["status"] = "halted_transient_connection_error"
+                        resume_state["status"] = halted_status
                         resume_state["updated_at"] = now_timestamp()
                         save_json_state(resume_state_path, resume_state)
                     raise

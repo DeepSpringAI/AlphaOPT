@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
 from src.dataloader import DataLoader 
-from src.utils import LLMTransientError, cal_time_cost, get_token_usage
+from src.utils import LLMContentFilterError, LLMTransientError, cal_time_cost, get_token_usage
 from src.train_eval_utils import *
 from src.llm_retriever import LibraryRetrieval
 from src.resume_state import now_timestamp, save_json_state, task_key
@@ -876,19 +876,24 @@ def run_library_diagnosis(
                         _mark_task_completed(task, _idx, result_payload)
         
                         set_span_output(merge_span, {"processed_count": processed_count})
-                except LLMTransientError as exc:
+                except (LLMTransientError, LLMContentFilterError) as exc:
                     fatal_transient_error = exc
                     processing_active = False
                     if resume_state is not None and resume_state_path:
-                        diagnosis_state["status"] = "halted_transient_connection_error"
+                        halted_status = (
+                            "halted_provider_content_filter"
+                            if isinstance(exc, LLMContentFilterError)
+                            else "halted_transient_connection_error"
+                        )
+                        diagnosis_state["status"] = halted_status
                         resume_state["current_phase"] = "diagnosis"
                         resume_state["current_iter"] = int(iter)
-                        resume_state["status"] = "halted_transient_connection_error"
+                        resume_state["status"] = halted_status
                         resume_state["updated_at"] = now_timestamp()
                         _save_diagnosis_snapshot()
                         save_json_state(resume_state_path, resume_state)
                     laminar_record_exception(merge_span, exc)
-                    add_span_tags(merge_span, ["transient-connection-error"])
+                    add_span_tags(merge_span, ["provider-content-filter" if isinstance(exc, LLMContentFilterError) else "transient-connection-error"])
                     break
                 except Exception as exc:
                     laminar_record_exception(merge_span, exc)
@@ -939,16 +944,21 @@ def run_library_diagnosis(
             idx, task = futures[future]
             try:
                 new_insights, is_success, is_execution, is_verify, is_diagnosis, laminar_trace_id, span_context_payload = future.result()
-            except LLMTransientError:
+            except (LLMTransientError, LLMContentFilterError) as exc:
                 for pending_future in futures:
                     if pending_future is not future:
                         pending_future.cancel()
                 processing_active = False
                 if resume_state is not None and resume_state_path:
-                    diagnosis_state["status"] = "halted_transient_connection_error"
+                    halted_status = (
+                        "halted_provider_content_filter"
+                        if isinstance(exc, LLMContentFilterError)
+                        else "halted_transient_connection_error"
+                    )
+                    diagnosis_state["status"] = halted_status
                     resume_state["current_phase"] = "diagnosis"
                     resume_state["current_iter"] = int(iter)
-                    resume_state["status"] = "halted_transient_connection_error"
+                    resume_state["status"] = halted_status
                     resume_state["updated_at"] = now_timestamp()
                     _save_diagnosis_snapshot()
                     save_json_state(resume_state_path, resume_state)

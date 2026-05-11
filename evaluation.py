@@ -11,7 +11,7 @@ from tqdm.auto import tqdm
 import concurrent.futures
 
 from src import utils as alphaopt_utils
-from src.utils import LLMTransientError, cal_time_cost, get_token_usage
+from src.utils import LLMContentFilterError, LLMTransientError, cal_time_cost, get_token_usage
 from src.dataloader import DataLoader, Task          
 from src.llm_programmer import ProgramGenerator
 from src.experience_library import ExperienceLibrary
@@ -432,11 +432,15 @@ def evaluate(
                 idx, task = futures[future]
                 try:
                     opt, run, pass_k, pass_k_run, trace_payload = future.result()
-                except LLMTransientError:
+                except (LLMTransientError, LLMContentFilterError) as exc:
                     for pending_future in futures:
                         if pending_future is not future:
                             pending_future.cancel()
-                    prior_state["status"] = "halted_transient_connection_error"
+                    prior_state["status"] = (
+                        "halted_provider_content_filter"
+                        if isinstance(exc, LLMContentFilterError)
+                        else "halted_transient_connection_error"
+                    )
                     prior_state["updated_at"] = now_timestamp()
                     save_json_state(resume_state_path, prior_state)
                     raise
