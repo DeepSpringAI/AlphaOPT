@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
 from src.dataloader import DataLoader 
-from src.utils import cal_time_cost, get_token_usage
+from src.utils import LLMTransientError, cal_time_cost, get_token_usage
 from src.train_eval_utils import *
 from src.llm_retriever import LibraryRetrieval
 from src.resume_state import now_timestamp, save_json_state, task_key
@@ -628,6 +628,7 @@ def run_library_diagnosis(
     queue_lock = Lock()
     processing_active = True
     processed_count = 0
+    fatal_transient_error = None
     
     # Counters for online merge rate calculation
     total_new_insights = 0
@@ -683,7 +684,7 @@ def run_library_diagnosis(
     pending_task_results = {}
 
     def process_insights_queue():
-        nonlocal processed_count, total_new_insights, successful_merges, processing_active
+        nonlocal processed_count, total_new_insights, successful_merges, processing_active, fatal_transient_error
         # print("Start processing insights queue")
         while processing_active or not new_ins_queue.empty():
             try:
@@ -875,6 +876,20 @@ def run_library_diagnosis(
                         _mark_task_completed(task, _idx, result_payload)
         
                         set_span_output(merge_span, {"processed_count": processed_count})
+                except LLMTransientError as exc:
+                    fatal_transient_error = exc
+                    processing_active = False
+                    if resume_state is not None and resume_state_path:
+                        diagnosis_state["status"] = "halted_transient_connection_error"
+                        resume_state["current_phase"] = "diagnosis"
+                        resume_state["current_iter"] = int(iter)
+                        resume_state["status"] = "halted_transient_connection_error"
+                        resume_state["updated_at"] = now_timestamp()
+                        _save_diagnosis_snapshot()
+                        save_json_state(resume_state_path, resume_state)
+                    laminar_record_exception(merge_span, exc)
+                    add_span_tags(merge_span, ["transient-connection-error"])
+                    break
                 except Exception as exc:
                     laminar_record_exception(merge_span, exc)
                     add_span_tags(merge_span, ["experiment-error"])
@@ -924,6 +939,20 @@ def run_library_diagnosis(
             idx, task = futures[future]
             try:
                 new_insights, is_success, is_execution, is_verify, is_diagnosis, laminar_trace_id, span_context_payload = future.result()
+            except LLMTransientError:
+                for pending_future in futures:
+                    if pending_future is not future:
+                        pending_future.cancel()
+                processing_active = False
+                if resume_state is not None and resume_state_path:
+                    diagnosis_state["status"] = "halted_transient_connection_error"
+                    resume_state["current_phase"] = "diagnosis"
+                    resume_state["current_iter"] = int(iter)
+                    resume_state["status"] = "halted_transient_connection_error"
+                    resume_state["updated_at"] = now_timestamp()
+                    _save_diagnosis_snapshot()
+                    save_json_state(resume_state_path, resume_state)
+                raise
             except Exception:
                 print(f"\n   [WARNING] Task {task.id}: diagnosis worker failed; recording task failure and continuing.\n")
                 import traceback
@@ -992,6 +1021,8 @@ def run_library_diagnosis(
     
     # Wait for processing thread to finish with 5 minute timeout
     processing_thread.join(timeout=300)  # 5 minute timeout
+    if fatal_transient_error is not None:
+        raise fatal_transient_error
     
     print(f"[Iteration {iter}] Queue processing completed, processed {processed_count} insights")
     

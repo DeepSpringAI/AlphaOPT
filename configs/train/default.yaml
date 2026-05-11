@@ -5,7 +5,13 @@ advanced_service: openrouter
 reasoning_effort: medium # OpenAI-compatible services only; set null/off to omit
 verbose: false
 start_iter: 0
+resume: true
+repair: true
 data_slice: 
+
+llm_retry:
+  transient_max_elapsed_sec: 900
+  transient_max_sleep_sec: 300
 
 # API Keys
 api_keys:

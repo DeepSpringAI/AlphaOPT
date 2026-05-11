@@ -12,6 +12,12 @@ reasoning_effort: medium # OpenAI-compatible services only; set null/off to omit
 n_runs: 1
 temperature: 0.0
 pass_at_k: 1
+resume: true
+repair: true
+
+llm_retry:
+  transient_max_elapsed_sec: 900
+  transient_max_sleep_sec: 300
 
 ablation:
   taxonomy: true

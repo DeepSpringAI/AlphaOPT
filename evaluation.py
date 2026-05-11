@@ -11,7 +11,7 @@ from tqdm.auto import tqdm
 import concurrent.futures
 
 from src import utils as alphaopt_utils
-from src.utils import cal_time_cost, get_token_usage
+from src.utils import LLMTransientError, cal_time_cost, get_token_usage
 from src.dataloader import DataLoader, Task          
 from src.llm_programmer import ProgramGenerator
 from src.experience_library import ExperienceLibrary
@@ -23,6 +23,7 @@ from src.resume_state import (
     default_evaluation_state,
     load_json_state,
     now_timestamp,
+    repair_evaluation_state,
     save_json_state,
     task_key,
 )
@@ -86,6 +87,12 @@ def evaluate(
             use_library=use_library,
         )
     )
+    completed_tasks = prior_state.setdefault("completed_tasks", {})
+    if resume_enabled and bool(getattr(config, "repair", True)):
+        repaired_task_ids = repair_evaluation_state(prior_state, enabled=True)
+        if repaired_task_ids:
+            print(f"Repaired evaluation resume state; re-running {len(repaired_task_ids)} task(s): {', '.join(repaired_task_ids)}")
+            save_json_state(resume_state_path, prior_state)
     completed_tasks = prior_state.setdefault("completed_tasks", {})
     aggregate = prior_state.setdefault(
         "aggregate",
@@ -425,6 +432,14 @@ def evaluate(
                 idx, task = futures[future]
                 try:
                     opt, run, pass_k, pass_k_run, trace_payload = future.result()
+                except LLMTransientError:
+                    for pending_future in futures:
+                        if pending_future is not future:
+                            pending_future.cancel()
+                    prior_state["status"] = "halted_transient_connection_error"
+                    prior_state["updated_at"] = now_timestamp()
+                    save_json_state(resume_state_path, prior_state)
+                    raise
                 except Exception as exc:
                     opt, run, pass_k, pass_k_run = 0, 0, 0, 0
                     trace_payload = {

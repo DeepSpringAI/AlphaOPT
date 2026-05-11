@@ -5,7 +5,13 @@ advanced_service: http://127.0.0.1:4010/v1
 reasoning_effort: medium # OpenAI-compatible services only; set null/off to omit
 verbose: true
 start_iter: 0
+resume: true
+repair: true
 data_slice:
+
+llm_retry:
+  transient_max_elapsed_sec: 900
+  transient_max_sleep_sec: 300
 
 api_keys:
   OPEN_ROUTER_KEY:

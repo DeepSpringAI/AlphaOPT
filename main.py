@@ -10,7 +10,7 @@ from src.config import (
     get_seed_taxonomy_path,
     write_training_run_metadata,
 )
-from src.resume_state import default_training_state, load_json_state, now_timestamp, save_json_state
+from src.resume_state import default_training_state, load_json_state, now_timestamp, repair_training_state, save_json_state
 from src.laminar_tracing import flush_laminar, init_laminar_from_env
 
 def main():
@@ -98,7 +98,7 @@ def main():
                 return json.load(f)
         return []
 
-    if resume_enabled and resume_state.get("status") == "in_progress":
+    if resume_enabled and resume_state.get("status") in {"in_progress", "halted_transient_connection_error"}:
         current_phase = resume_state.get("current_phase")
         active_iter = int(resume_state.get("current_iter", start_iter) or start_iter)
         if current_phase == "online_learning":
@@ -108,6 +108,15 @@ def main():
             taxo_path = online_paths.get("taxonomy", f"{config.file_paths.lib_dir}/latest_taxonomy_base_snap.json")
             if all(os.path.exists(p) for p in (tasks_path, lib_path, taxo_path)):
                 train_tasks = DataLoader(tasks_path, mode="learn", filter_success_num=None, reset=False)
+                repaired = repair_training_state(
+                    resume_state,
+                    train_tasks,
+                    enabled=bool(getattr(config, "repair", True)),
+                    batch_size=int(config.params.batch_size),
+                )
+                if repaired:
+                    print(f"Repaired training resume state; re-running {len(repaired)} task(s): {', '.join(repaired)}")
+                    save_json_state(resume_state_path, resume_state)
                 library = ExperienceLibrary.from_json_file(library_path=lib_path, taxonomy_path=taxo_path)
                 metrics_log = _load_metrics_log()
                 resume_phase_override = "online_learning"
@@ -122,6 +131,15 @@ def main():
             taxo_path = diag_paths.get("taxonomy", f"{config.file_paths.lib_dir}/latest_taxonomy_iter{active_iter}_snap.json")
             if all(os.path.exists(p) for p in (tasks_path, lib_path, taxo_path)):
                 train_tasks = DataLoader(tasks_path, mode="learn", filter_success_num=None, reset=False)
+                repaired = repair_training_state(
+                    resume_state,
+                    train_tasks,
+                    enabled=bool(getattr(config, "repair", True)),
+                    batch_size=int(config.params.batch_size),
+                )
+                if repaired:
+                    print(f"Repaired training resume state; re-running {len(repaired)} task(s): {', '.join(repaired)}")
+                    save_json_state(resume_state_path, resume_state)
                 library = ExperienceLibrary.from_json_file(library_path=lib_path, taxonomy_path=taxo_path)
                 metrics_log = _load_metrics_log()
                 resume_phase_override = "diagnosis"
@@ -135,6 +153,15 @@ def main():
             taxo_path = f"{config.file_paths.lib_dir}/latest_taxonomy_diag_iter{active_iter}.json"
             if all(os.path.exists(p) for p in (tasks_path, lib_path, taxo_path)):
                 train_tasks = DataLoader(tasks_path, mode="learn", filter_success_num=None, reset=False)
+                repaired = repair_training_state(
+                    resume_state,
+                    train_tasks,
+                    enabled=bool(getattr(config, "repair", True)),
+                    batch_size=int(config.params.batch_size),
+                )
+                if repaired:
+                    print(f"Repaired training resume state; re-running {len(repaired)} task(s): {', '.join(repaired)}")
+                    save_json_state(resume_state_path, resume_state)
                 library = ExperienceLibrary.from_json_file(library_path=lib_path, taxonomy_path=taxo_path)
                 metrics_log = _load_metrics_log()
                 resume_phase_override = "refinement"

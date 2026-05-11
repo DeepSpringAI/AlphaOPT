@@ -72,6 +72,18 @@ _EXPERIMENT_META_CACHE: dict | None = None
 DEFAULT_REASONING_EFFORT = "medium"
 
 
+class LLMTransientError(BaseException):
+    """
+    Raised when provider/network errors persist past the bounded retry window.
+
+    Callers should treat this as an infrastructure halt, not a task failure.
+    """
+
+    def __init__(self, message: str, *, error_info: dict | None = None):
+        super().__init__(message)
+        self.error_info = error_info or {}
+
+
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -502,6 +514,13 @@ def _classify_llm_error(err: Exception) -> dict:
     if status_code is None:
         response = getattr(err, "response", None)
         status_code = getattr(response, "status_code", None)
+    if status_code is None:
+        m = re.search(r"(?:status|code|error code)[:=\s]+([0-9]{3})", low)
+        if m:
+            try:
+                status_code = int(m.group(1))
+            except Exception:
+                status_code = None
 
     is_content_filter = (
         "content_filter" in low
@@ -510,20 +529,27 @@ def _classify_llm_error(err: Exception) -> dict:
     )
     if is_content_filter:
         kind = "content_filter"
+    elif status_code is not None and int(status_code) in (408, 409, 425, 429):
+        kind = "rate_limit" if int(status_code) == 429 else "connection_error"
+    elif status_code is not None and 500 <= int(status_code) <= 599:
+        kind = "server_error"
     elif "connection error" in low:
         kind = "connection_error"
     elif "rate limit" in low:
         kind = "rate_limit"
-    elif "timeout" in low:
+    elif "timeout" in low or "timed out" in low:
         kind = "timeout"
     elif "badrequesterror" in low or "error code: 400" in low:
         kind = "bad_request"
     else:
         kind = "unknown"
 
+    is_transient = kind in {"connection_error", "rate_limit", "timeout", "server_error"}
+
     return {
         "kind": kind,
         "status_code": status_code,
+        "is_transient": is_transient,
         "is_content_filter": is_content_filter,
         "content_filter_result": _parse_content_filter_flags(err_text) if is_content_filter else {},
         "error_repr": err_text,
@@ -735,6 +761,27 @@ def _get_experiment_metadata() -> dict:
         return meta
 
 
+def _runtime_config_value(path: str, default: Any = None) -> Any:
+    try:
+        from omegaconf import OmegaConf
+    except Exception:
+        OmegaConf = None  # type: ignore[assignment]
+
+    for env_name in ("ALPHAOPT_EVAL_CONFIG", "ALPHAOPT_TRAIN_CONFIG"):
+        cfg_path = os.getenv(env_name)
+        if not cfg_path or OmegaConf is None:
+            continue
+        try:
+            cfg = OmegaConf.load(cfg_path)
+            value = _get_nested(cfg, path, default=None)
+            if value is not None:
+                return value
+        except Exception:
+            continue
+    value = _get_nested(config, path, default=None)
+    return default if value is None else value
+
+
 def _is_trace_enabled() -> bool:
     v = str(os.getenv("ALPHAOPT_TRACE_ENABLED", "1")).strip().lower()
     return v not in ("0", "false", "off", "no")
@@ -914,6 +961,8 @@ def call_llm_and_parse_with_retry(
     reasoning_effort: str | None = None,
     max_retry: int = 3,
     sleep_sec: float = 2,
+    transient_max_elapsed_sec: float | None = None,
+    transient_max_sleep_sec: float | None = None,
     verbose: bool = True,
     log_header: str | None = None,
     error_message: str | None = None,
@@ -953,6 +1002,8 @@ def call_llm_and_parse_with_retry(
                     reasoning_effort=reasoning_effort,
                     max_retry=max_retry,
                     sleep_sec=sleep_sec,
+                    transient_max_elapsed_sec=transient_max_elapsed_sec,
+                    transient_max_sleep_sec=transient_max_sleep_sec,
                     verbose=verbose,
                     log_header=log_header,
                     error_message=error_message,
@@ -1169,8 +1220,30 @@ def call_llm_and_parse_with_retry(
 
         raise RuntimeError("Unsupported vendor")
 
-    # Retry loop
-    for attempt in range(1, max_retry + 1):
+    if transient_max_elapsed_sec is None:
+        transient_max_elapsed_sec = float(
+            os.getenv(
+                "ALPHAOPT_LLM_TRANSIENT_MAX_ELAPSED_SEC",
+                _runtime_config_value("llm_retry.transient_max_elapsed_sec", 900),
+            )
+        )
+    if transient_max_sleep_sec is None:
+        transient_max_sleep_sec = float(
+            os.getenv(
+                "ALPHAOPT_LLM_TRANSIENT_MAX_SLEEP_SEC",
+                _runtime_config_value("llm_retry.transient_max_sleep_sec", 300),
+            )
+        )
+    transient_max_elapsed_sec = max(1.0, float(transient_max_elapsed_sec))
+    transient_max_sleep_sec = max(1.0, float(transient_max_sleep_sec))
+
+    retry_started_at = time.monotonic()
+    attempt = 0
+
+    # Retry loop. Parse/schema failures honor max_retry; transient provider/network
+    # failures use a bounded elapsed-time window before halting for later resume.
+    while True:
+        attempt += 1
         attempt_start_ns = time.time_ns()
         span_id = _new_span_id_hex()
         prompt_text = _prompt_to_text(prompt)
@@ -1515,21 +1588,33 @@ def call_llm_and_parse_with_retry(
             if span_path:
                 trace_hint += "\nSpan: written to local OTLP stream"
 
-            # final attempt → raise
-            if attempt == max_retry:
+            elapsed = time.monotonic() - retry_started_at
+            is_transient = bool(err_info.get("is_transient"))
+            retry_window_exhausted = is_transient and elapsed >= float(transient_max_elapsed_sec)
+            parse_retry_exhausted = (not is_transient) and attempt >= max_retry
+
+            # final attempt/window exhausted -> raise
+            if retry_window_exhausted or parse_retry_exhausted:
                 detail = (
-                    f"\nLLM request failed after {max_retry} attempts"
+                    f"\nLLM request failed after {attempt} attempts"
                     f"\nType: {err_info['kind']}"
                     f"\nStatus: {err_info['status_code']}"
+                    f"\nElapsed: {elapsed:.1f}s"
                     f"{trace_hint}"
                 )
                 if err_info["is_content_filter"]:
                     detail += f"\nContent filter details: {err_info['content_filter_result']}"
-                raise RuntimeError((error_message or detail) + detail if error_message else detail) from err
+                message = (error_message or detail) + detail if error_message else detail
+                if is_transient:
+                    raise LLMTransientError(message, error_info=err_info) from err
+                raise RuntimeError(message) from err
             # exponential back-off
             backoff = sleep_sec * (2 ** (attempt - 1))
+            if is_transient:
+                remaining = max(0.0, float(transient_max_elapsed_sec) - elapsed)
+                backoff = min(backoff, float(transient_max_sleep_sec), remaining)
             print(
-                f"\nLLM call failed on attempt {attempt}/{max_retry}. "
+                f"\nLLM call failed on attempt {attempt}/{max_retry if not is_transient else 'elapsed-window'}. "
                 f"type={err_info['kind']} status={err_info['status_code']}. "
                 f"\nError: {err}.{trace_hint}\nRetrying in {backoff:.1f}s …"
             )
