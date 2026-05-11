@@ -1,4 +1,5 @@
-datasets: [optmath_bench, nlp4lp_test, nl4opt_test, industryor_test, logior, optibench]
+# datasets: [optmath_bench, nlp4lp_test, nl4opt_test, industryor_test, logior, optibench]
+datasets: [nlp4lp_test, nl4opt_test, industryor_test, logior, optibench]
 data_path_template: ./data/optimization_tasks/split/test_data/${dataset}.json
 
 library_path: ./data/experience_library/default/library.json
