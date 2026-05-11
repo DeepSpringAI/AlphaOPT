@@ -11,7 +11,7 @@ from itertools import combinations
 from src.dataloader import DataLoader 
 from src.utils import LLMContentFilterError, LLMTransientError, cal_time_cost, get_token_usage
 from src.train_eval_utils import *
-from src.resume_state import now_timestamp, save_json_state
+from src.resume_state import make_training_task_result, mark_training_halted, now_timestamp, save_json_state, task_key
 from src.laminar_tracing import (
     add_span_tags,
     current_trace_id,
@@ -157,6 +157,26 @@ def run_library_online_learning(
                     },
                 )
                 return result
+            except (LLMContentFilterError, LLMTransientError) as exc:
+                trace_id = current_trace_id()
+                status = "provider_policy_blocked" if isinstance(exc, LLMContentFilterError) else "transient_connection_halt"
+                laminar_record_exception(root_span, exc)
+                add_span_tags(root_span, [status])
+                set_span_attributes(root_span, {"alphaopt.status": status, "alphaopt.laminar_trace_id": trace_id})
+                set_span_output(root_span, {"status": status, "error": str(exc)[:1000]})
+                record_trace_index(
+                    paths.train_output_dir,
+                    {
+                        "mode": "training",
+                        "phase": "online_learning",
+                        "task_id": task.id,
+                        "iteration": iter,
+                        "trace_id": trace_id,
+                        "status": status,
+                        "artifact_path": train_output_path,
+                    },
+                )
+                raise
             except Exception as exc:
                 trace_id = current_trace_id()
                 laminar_record_exception(root_span, exc)
@@ -665,6 +685,7 @@ def run_library_online_learning(
     iter_explore_count = 0
     iter_explore_success = 0
     fail_to_explore_lst = []
+    provider_policy_blocked_task_ids = []
 
     # Counters for self_verify_retrieval_and_success outcomes
     iter_self_verify_total = 0
@@ -684,8 +705,30 @@ def run_library_online_learning(
     usage_before = get_token_usage()
 
     resume_batch_start = 0
+    online_task_results = {}
+    completed_task_ids = set()
     if resume_state:
-        resume_batch_start = int((resume_state.get("online_learning") or {}).get("next_batch_start", 0) or 0)
+        online_state = resume_state.setdefault("online_learning", {})
+        online_task_results = online_state.setdefault("task_results", {})
+        completed_task_ids = {task_key(task_id) for task_id in online_state.get("completed_task_ids", [])}
+        resume_batch_start = int(online_state.get("next_batch_start", 0) or 0)
+
+    for idx, task in enumerate(train_tasks):
+        prior = online_task_results.get(task_key(task.id))
+        if not prior:
+            continue
+        result_payload = prior.get("result", {})
+        train_success_flags[idx] = bool(result_payload.get("is_success", False))
+        if result_payload.get("is_execution") is False:
+            fail_to_execute_lst.append(task.id)
+        if result_payload.get("is_verify") is False:
+            fail_to_verify_lst.append(task.id)
+        if result_payload.get("is_self_explore") is not None:
+            iter_explore_count += 1
+            if result_payload.get("is_self_explore"):
+                iter_explore_success += 1
+            else:
+                fail_to_explore_lst.append(task.id)
 
     for start in range(resume_batch_start, len(train_tasks), params.batch_size):
         batch = train_tasks[start:start + params.batch_size] 
@@ -709,31 +752,55 @@ def run_library_online_learning(
                     temp_library_lock                              # pass lock for thread-safe updates
                 ): (start+i, task)
                 for i, task in enumerate(batch)
+                if task_key(task.id) not in completed_task_ids
             }
 
             batch_idx = start // params.batch_size + 1
-            for future in tqdm(as_completed(futures), total=len(batch), desc=f"[Iteration {iter}] Library Online Learning Phase Batch {batch_idx} (tasks {start+1}-{start+len(batch)}) \n"):
+            for future in tqdm(as_completed(futures), total=len(futures), desc=f"[Iteration {iter}] Library Online Learning Phase Batch {batch_idx} (tasks {start+1}-{start+len(batch)}) \n"):
                 # (start+i, task)
                 idx, task = futures[future]
                 try:
                     new_insights, all_attempts_optimal, is_execution, is_verify, is_self_explore, first_attempt_optimal = future.result()
-                except (LLMTransientError, LLMContentFilterError) as exc:
+                except LLMContentFilterError as exc:
+                    print(f"\n   [WARNING] Task {task.id}: provider policy blocked online learning; recording blocked task and continuing.\n")
+                    new_insights = []
+                    all_attempts_optimal = False
+                    is_execution = None
+                    is_verify = None
+                    is_self_explore = None
+                    first_attempt_optimal = False
+                    task.output_status.append("provider_policy_blocked")
+                    task.retri_ins_lst.append([])
+                    if resume_state is not None and resume_state_path:
+                        online_task_results[task_key(task.id)] = make_training_task_result(
+                            task=task,
+                            status="provider_policy_blocked",
+                            is_success=False,
+                            is_execution=is_execution,
+                            is_verify=is_verify,
+                            is_self_explore=is_self_explore,
+                            error=str(exc),
+                        )
+                        completed_task_ids.add(task_key(task.id))
+                        online_state = resume_state.setdefault("online_learning", {})
+                        online_state["task_results"] = online_task_results
+                        online_state["completed_task_ids"] = sorted(completed_task_ids)
+                except LLMTransientError as exc:
                     for pending_future in futures:
                         if pending_future is not future:
                             pending_future.cancel()
                     if resume_state is not None and resume_state_path:
-                        halted_status = (
-                            "halted_provider_content_filter"
-                            if isinstance(exc, LLMContentFilterError)
-                            else "halted_transient_connection_error"
-                        )
                         online_state = resume_state.setdefault("online_learning", {})
-                        online_state["status"] = halted_status
+                        online_state["status"] = "halted_transient_connection_error"
                         online_state["next_batch_start"] = int(start)
-                        resume_state["current_phase"] = "online_learning"
-                        resume_state["current_iter"] = int(iter)
-                        resume_state["status"] = halted_status
-                        resume_state["updated_at"] = now_timestamp()
+                        mark_training_halted(
+                            resume_state,
+                            phase="online_learning",
+                            iter=iter,
+                            status="halted_transient_connection_error",
+                            unit_id=task.id,
+                            error=exc,
+                        )
                         save_json_state(resume_state_path, resume_state)
                     raise
                 except Exception:
@@ -751,6 +818,8 @@ def run_library_online_learning(
 
                 if is_execution is False:
                     fail_to_execute_lst.append(task.id)
+                if task.output_status and task.output_status[-1] == "provider_policy_blocked":
+                    provider_policy_blocked_task_ids.append(task.id)
                 
                 if is_verify is False:
                     fail_to_verify_lst.append(task.id)
@@ -768,6 +837,19 @@ def run_library_online_learning(
 
                 # train_accuracy is based on first attempt optimal status
                 train_success_flags[idx] = first_attempt_optimal
+                if resume_state is not None and resume_state_path:
+                    status = "optimal" if first_attempt_optimal else "not_optimal"
+                    if task.output_status and task.output_status[-1] == "provider_policy_blocked":
+                        status = "provider_policy_blocked"
+                    online_task_results[task_key(task.id)] = make_training_task_result(
+                        task=task,
+                        status=status,
+                        is_success=bool(first_attempt_optimal),
+                        is_execution=is_execution,
+                        is_verify=is_verify,
+                        is_self_explore=is_self_explore,
+                    )
+                    completed_task_ids.add(task_key(task.id))
 
         #* Once this batch is completed, new insights will be added into the library 
         if batch_new_insights: 
@@ -778,12 +860,46 @@ def run_library_online_learning(
                     #* Conduct insight merge and get merged insight(s) 
                     for idx, ins in enumerate(batch_new_insights):
                         ins["insight_id"] = idx
-                    merged_batch_new_insights = llm_ins.conduct_insight_merge(
-                        candidate_insights=batch_new_insights,
-                        target=f"Batch {batch_idx}",
-                        verbose=True,
-                        output_path=paths.train_output_dir,
-                    )
+                    try:
+                        merged_batch_new_insights = llm_ins.conduct_insight_merge(
+                            candidate_insights=batch_new_insights,
+                            target=f"Batch {batch_idx}",
+                            verbose=True,
+                            output_path=paths.train_output_dir,
+                        )
+                    except LLMContentFilterError as exc:
+                        print(f"Provider policy blocked batch insight merge for batch {batch_idx}; keeping original insights without merged variant.")
+                        record_event(
+                            "provider_policy_blocked",
+                            {"phase": "online_learning_batch_merge", "batch_idx": batch_idx, "error": str(exc)[:1000]},
+                            output_path=paths.train_output_dir,
+                        )
+                        merged_batch_new_insights = []
+                    except LLMTransientError as exc:
+                        library.save(f"{paths.lib_dir}/library_base_snap.json")
+                        library.save_taxonomy(f"{paths.lib_dir}/latest_taxonomy_base_snap.json")
+                        train_tasks.save_as_json(f"{paths.train_output_dir}/train_tasks_record_base_snap.json")
+                        if resume_state is not None and resume_state_path:
+                            online_state = resume_state.setdefault("online_learning", {})
+                            online_state["status"] = "halted_transient_connection_error"
+                            online_state["next_batch_start"] = int(start)
+                            online_state["completed_task_ids"] = sorted(completed_task_ids)
+                            online_state["task_results"] = online_task_results
+                            online_state["snapshot_paths"] = {
+                                "library": f"{paths.lib_dir}/library_base_snap.json",
+                                "taxonomy": f"{paths.lib_dir}/latest_taxonomy_base_snap.json",
+                                "tasks": f"{paths.train_output_dir}/train_tasks_record_base_snap.json",
+                            }
+                            mark_training_halted(
+                                resume_state,
+                                phase="online_learning",
+                                iter=iter,
+                                status="halted_transient_connection_error",
+                                unit_id=f"batch-{batch_idx}",
+                                error=exc,
+                            )
+                            save_json_state(resume_state_path, resume_state)
+                        raise
                     num_all_merged = len(merged_batch_new_insights)
                     total_num_all_merged += num_all_merged
                 else:
@@ -811,7 +927,42 @@ def run_library_online_learning(
                         #* Self-verify on merged insights
                         # merged_batch_new_insights dynamically exclude those not verified merged insights in this round for the tasks in the next rounds
                         if merged_batch_new_insights:
-                            merged_batch_new_insights = self_verify_merged_insights(iter, task, llm_opt, task_new_insights, merged_batch_new_insights, prev_insights)
+                            try:
+                                merged_batch_new_insights = self_verify_merged_insights(iter, task, llm_opt, task_new_insights, merged_batch_new_insights, prev_insights)
+                            except LLMContentFilterError as exc:
+                                print(f"Provider policy blocked self-verification for merged insights on task {task.id}; keeping originals.")
+                                record_event(
+                                    "provider_policy_blocked",
+                                    {"phase": "online_learning_batch_self_verify", "task_id": task.id, "error": str(exc)[:1000]},
+                                    output_path=paths.train_output_dir,
+                                )
+                                merged_batch_new_insights = []
+                                break
+                            except LLMTransientError as exc:
+                                library.save(f"{paths.lib_dir}/library_base_snap.json")
+                                library.save_taxonomy(f"{paths.lib_dir}/latest_taxonomy_base_snap.json")
+                                train_tasks.save_as_json(f"{paths.train_output_dir}/train_tasks_record_base_snap.json")
+                                if resume_state is not None and resume_state_path:
+                                    online_state = resume_state.setdefault("online_learning", {})
+                                    online_state["status"] = "halted_transient_connection_error"
+                                    online_state["next_batch_start"] = int(start)
+                                    online_state["completed_task_ids"] = sorted(completed_task_ids)
+                                    online_state["task_results"] = online_task_results
+                                    online_state["snapshot_paths"] = {
+                                        "library": f"{paths.lib_dir}/library_base_snap.json",
+                                        "taxonomy": f"{paths.lib_dir}/latest_taxonomy_base_snap.json",
+                                        "tasks": f"{paths.train_output_dir}/train_tasks_record_base_snap.json",
+                                    }
+                                    mark_training_halted(
+                                        resume_state,
+                                        phase="online_learning",
+                                        iter=iter,
+                                        status="halted_transient_connection_error",
+                                        unit_id=task.id,
+                                        error=exc,
+                                    )
+                                    save_json_state(resume_state_path, resume_state)
+                                raise
 
                     #* Add insights not merged of each task
                     for task in batch:
@@ -847,12 +998,50 @@ def run_library_online_learning(
                 
                 for new_insight in all_tasks_new_insights:
                     # Conduct online merge with existing library insights
-                    merged_insights, _, parent_ids = llm_ins.conduct_insight_online_merge(
-                        new_insight=[new_insight],  # Wrap in list as expected by the method
-                        library=library,
-                        verbose=True,
-                        output_path=paths.train_output_dir,
-                    )
+                    try:
+                        merged_insights, _, parent_ids = llm_ins.conduct_insight_online_merge(
+                            new_insight=[new_insight],  # Wrap in list as expected by the method
+                            library=library,
+                            verbose=True,
+                            output_path=paths.train_output_dir,
+                        )
+                    except LLMContentFilterError as exc:
+                        print(f"Provider policy blocked online merge for task {new_insight.get('task_id')}; skipping this insight mutation.")
+                        record_event(
+                            "provider_policy_blocked",
+                            {
+                                "phase": "online_learning_online_merge",
+                                "task_id": new_insight.get("task_id"),
+                                "error": str(exc)[:1000],
+                            },
+                            output_path=paths.train_output_dir,
+                        )
+                        continue
+                    except LLMTransientError as exc:
+                        library.save(f"{paths.lib_dir}/library_base_snap.json")
+                        library.save_taxonomy(f"{paths.lib_dir}/latest_taxonomy_base_snap.json")
+                        train_tasks.save_as_json(f"{paths.train_output_dir}/train_tasks_record_base_snap.json")
+                        if resume_state is not None and resume_state_path:
+                            online_state = resume_state.setdefault("online_learning", {})
+                            online_state["status"] = "halted_transient_connection_error"
+                            online_state["next_batch_start"] = int(start)
+                            online_state["completed_task_ids"] = sorted(completed_task_ids)
+                            online_state["task_results"] = online_task_results
+                            online_state["snapshot_paths"] = {
+                                "library": f"{paths.lib_dir}/library_base_snap.json",
+                                "taxonomy": f"{paths.lib_dir}/latest_taxonomy_base_snap.json",
+                                "tasks": f"{paths.train_output_dir}/train_tasks_record_base_snap.json",
+                            }
+                            mark_training_halted(
+                                resume_state,
+                                phase="online_learning",
+                                iter=iter,
+                                status="halted_transient_connection_error",
+                                unit_id=new_insight.get("task_id"),
+                                error=exc,
+                            )
+                            save_json_state(resume_state_path, resume_state)
+                        raise
                     
                     # If no merge occurred, add original insight directly
                     if not merged_insights:
@@ -912,7 +1101,41 @@ def run_library_online_learning(
                                             task_new_insights.append(ins.to_dict())
                             task_new_insights.append(merged_insights)
 
-                        is_verify = self_verify_test(iter=None, task=task, llm_opt=llm_opt, new_insights=task_new_insights, prev_insights=prev_insights)
+                        try:
+                            is_verify = self_verify_test(iter=None, task=task, llm_opt=llm_opt, new_insights=task_new_insights, prev_insights=prev_insights)
+                        except LLMContentFilterError as exc:
+                            print(f"Provider policy blocked online-merge verification for task {task.id}; skipping merged insight.")
+                            record_event(
+                                "provider_policy_blocked",
+                                {"phase": "online_learning_online_merge_verify", "task_id": task.id, "error": str(exc)[:1000]},
+                                output_path=paths.train_output_dir,
+                            )
+                            is_verify = False
+                        except LLMTransientError as exc:
+                            library.save(f"{paths.lib_dir}/library_base_snap.json")
+                            library.save_taxonomy(f"{paths.lib_dir}/latest_taxonomy_base_snap.json")
+                            train_tasks.save_as_json(f"{paths.train_output_dir}/train_tasks_record_base_snap.json")
+                            if resume_state is not None and resume_state_path:
+                                online_state = resume_state.setdefault("online_learning", {})
+                                online_state["status"] = "halted_transient_connection_error"
+                                online_state["next_batch_start"] = int(start)
+                                online_state["completed_task_ids"] = sorted(completed_task_ids)
+                                online_state["task_results"] = online_task_results
+                                online_state["snapshot_paths"] = {
+                                    "library": f"{paths.lib_dir}/library_base_snap.json",
+                                    "taxonomy": f"{paths.lib_dir}/latest_taxonomy_base_snap.json",
+                                    "tasks": f"{paths.train_output_dir}/train_tasks_record_base_snap.json",
+                                }
+                                mark_training_halted(
+                                    resume_state,
+                                    phase="online_learning",
+                                    iter=iter,
+                                    status="halted_transient_connection_error",
+                                    unit_id=task.id,
+                                    error=exc,
+                                )
+                                save_json_state(resume_state_path, resume_state)
+                            raise
                         if not is_verify:
                             all_tasks_verified = False
                             break
@@ -985,7 +1208,8 @@ def run_library_online_learning(
             online_state = resume_state.setdefault("online_learning", {})
             online_state["status"] = "in_progress"
             online_state["next_batch_start"] = int(start + len(batch))
-            online_state["completed_task_ids"] = [task.id for task in train_tasks[: start + len(batch)]]
+            online_state["completed_task_ids"] = sorted(completed_task_ids)
+            online_state["task_results"] = online_task_results
             online_state["snapshot_paths"] = {
                 "library": f"{paths.lib_dir}/library_base_snap.json",
                 "taxonomy": f"{paths.lib_dir}/latest_taxonomy_base_snap.json",
@@ -1071,6 +1295,7 @@ def run_library_online_learning(
         "fail_to_execute_task_ids": fail_to_execute_lst,
         "fail_to_explore_task_ids": fail_to_explore_lst,
         "fail_to_verify_task_ids": fail_to_verify_lst,
+        "provider_policy_blocked_task_ids": provider_policy_blocked_task_ids,
         "online_learning_duration (min)": train_duration,
         "token_usage": token_usage_delta,
     }
@@ -1079,6 +1304,8 @@ def run_library_online_learning(
         online_state = resume_state.setdefault("online_learning", {})
         online_state["status"] = "completed"
         online_state["next_batch_start"] = int(len(train_tasks))
+        online_state["completed_task_ids"] = sorted(completed_task_ids)
+        online_state["task_results"] = online_task_results
         resume_state["updated_at"] = now_timestamp()
         save_json_state(resume_state_path, resume_state)
 

@@ -10,7 +10,7 @@ from src.dataloader import DataLoader
 from src.utils import LLMContentFilterError, LLMTransientError, cal_time_cost, get_token_usage
 from src.train_eval_utils import *
 from src.llm_retriever import LibraryRetrieval
-from src.resume_state import now_timestamp, save_json_state, task_key
+from src.resume_state import make_training_task_result, mark_training_halted, now_timestamp, save_json_state, task_key
 from src.laminar_tracing import (
     add_span_tags,
     current_trace_id,
@@ -120,6 +120,26 @@ def run_library_diagnosis(
                     },
                 )
                 return (*result, trace_id, span_context)
+            except (LLMContentFilterError, LLMTransientError) as exc:
+                trace_id = current_trace_id()
+                status = "provider_policy_blocked" if isinstance(exc, LLMContentFilterError) else "transient_connection_halt"
+                laminar_record_exception(root_span, exc)
+                add_span_tags(root_span, [status])
+                set_span_attributes(root_span, {"alphaopt.status": status, "alphaopt.laminar_trace_id": trace_id})
+                set_span_output(root_span, {"status": status, "error": str(exc)[:1000]})
+                record_trace_index(
+                    paths.train_output_dir,
+                    {
+                        "mode": "training",
+                        "phase": "diagnosis",
+                        "task_id": task.id,
+                        "iteration": iter,
+                        "trace_id": trace_id,
+                        "status": status,
+                        "artifact_path": train_output_path,
+                    },
+                )
+                raise
             except Exception as exc:
                 trace_id = current_trace_id()
                 laminar_record_exception(root_span, exc)
@@ -616,6 +636,7 @@ def run_library_diagnosis(
     iter_self_verify_partial_retrieval_tasks = 0  # subset of success: task success + partial retrieval
 
     fail_to_verify_lst = []
+    provider_policy_blocked_task_ids = []
     fail_to_execute_lst = []
 
 
@@ -876,24 +897,39 @@ def run_library_diagnosis(
                         _mark_task_completed(task, _idx, result_payload)
         
                         set_span_output(merge_span, {"processed_count": processed_count})
-                except (LLMTransientError, LLMContentFilterError) as exc:
+                except LLMContentFilterError as exc:
+                    pending = pending_task_results.pop(task_key(task_id), None)
+                    if pending is not None:
+                        _idx, task, result_payload = pending
+                        task.output_status.append("provider_policy_blocked")
+                        result_payload = {
+                            **result_payload,
+                            "status": "provider_policy_blocked",
+                            "is_success": False,
+                            "error": str(exc)[:4000],
+                        }
+                        _mark_task_completed(task, _idx, result_payload)
+                    laminar_record_exception(merge_span, exc)
+                    add_span_tags(merge_span, ["provider-policy-blocked"])
+                    set_span_output(merge_span, {"status": "provider_policy_blocked", "task_id": task_id})
+                    print(f"[Iteration {iter}] Provider policy blocked diagnosis merge for task {task_id}; skipping merge and continuing.")
+                except LLMTransientError as exc:
                     fatal_transient_error = exc
                     processing_active = False
                     if resume_state is not None and resume_state_path:
-                        halted_status = (
-                            "halted_provider_content_filter"
-                            if isinstance(exc, LLMContentFilterError)
-                            else "halted_transient_connection_error"
+                        diagnosis_state["status"] = "halted_transient_connection_error"
+                        mark_training_halted(
+                            resume_state,
+                            phase="diagnosis",
+                            iter=iter,
+                            status="halted_transient_connection_error",
+                            unit_id=task_id,
+                            error=exc,
                         )
-                        diagnosis_state["status"] = halted_status
-                        resume_state["current_phase"] = "diagnosis"
-                        resume_state["current_iter"] = int(iter)
-                        resume_state["status"] = halted_status
-                        resume_state["updated_at"] = now_timestamp()
                         _save_diagnosis_snapshot()
                         save_json_state(resume_state_path, resume_state)
                     laminar_record_exception(merge_span, exc)
-                    add_span_tags(merge_span, ["provider-content-filter" if isinstance(exc, LLMContentFilterError) else "transient-connection-error"])
+                    add_span_tags(merge_span, ["transient-connection-error"])
                     break
                 except Exception as exc:
                     laminar_record_exception(merge_span, exc)
@@ -923,6 +959,8 @@ def run_library_diagnosis(
             iter_diagnose_count += 1
             if result_payload.get("is_diagnosis") is True:
                 iter_diagnose_success += 1
+        if result_payload.get("status") == "provider_policy_blocked":
+            provider_policy_blocked_task_ids.append(task.id)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
@@ -944,22 +982,32 @@ def run_library_diagnosis(
             idx, task = futures[future]
             try:
                 new_insights, is_success, is_execution, is_verify, is_diagnosis, laminar_trace_id, span_context_payload = future.result()
-            except (LLMTransientError, LLMContentFilterError) as exc:
+            except LLMContentFilterError as exc:
+                print(f"\n   [WARNING] Task {task.id}: provider policy blocked diagnosis; recording blocked task and continuing.\n")
+                new_insights = []
+                is_success = False
+                is_execution = None
+                is_verify = None
+                is_diagnosis = None
+                laminar_trace_id = None
+                span_context_payload = None
+                task.output_status.append("provider_policy_blocked")
+                task.retri_ins_lst.append([])
+            except LLMTransientError as exc:
                 for pending_future in futures:
                     if pending_future is not future:
                         pending_future.cancel()
                 processing_active = False
                 if resume_state is not None and resume_state_path:
-                    halted_status = (
-                        "halted_provider_content_filter"
-                        if isinstance(exc, LLMContentFilterError)
-                        else "halted_transient_connection_error"
+                    diagnosis_state["status"] = "halted_transient_connection_error"
+                    mark_training_halted(
+                        resume_state,
+                        phase="diagnosis",
+                        iter=iter,
+                        status="halted_transient_connection_error",
+                        unit_id=task.id,
+                        error=exc,
                     )
-                    diagnosis_state["status"] = halted_status
-                    resume_state["current_phase"] = "diagnosis"
-                    resume_state["current_iter"] = int(iter)
-                    resume_state["status"] = halted_status
-                    resume_state["updated_at"] = now_timestamp()
                     _save_diagnosis_snapshot()
                     save_json_state(resume_state_path, resume_state)
                 raise
@@ -977,6 +1025,7 @@ def run_library_diagnosis(
                 task.output_status.append("experiment_error")
                 task.retri_ins_lst.append([])
             result_payload = {
+                "status": "provider_policy_blocked" if (task.output_status and task.output_status[-1] == "provider_policy_blocked") else ("optimal" if is_success else "not_optimal"),
                 "is_success": bool(is_success),
                 "is_execution": is_execution,
                 "is_verify": is_verify,
@@ -986,6 +1035,8 @@ def run_library_diagnosis(
 
             if is_execution is False:
                 fail_to_execute_lst.append(task.id)
+            if result_payload.get("status") == "provider_policy_blocked":
+                provider_policy_blocked_task_ids.append(task.id)
 
             if is_verify is False:
                 fail_to_verify_lst.append(task.id)
@@ -1097,6 +1148,7 @@ def run_library_diagnosis(
         "number_of_train_tasks": len(train_tasks) if train_tasks else 0,
         "fail_to_verify_task_ids": fail_to_verify_lst,
         "fail_to_execute_task_ids": fail_to_execute_lst,
+        "provider_policy_blocked_task_ids": provider_policy_blocked_task_ids,
         "library_diagnosis_duration (min)": train_duration,
         "token_usage": token_usage_delta,
     }

@@ -98,14 +98,7 @@ def main():
                 return json.load(f)
         return []
 
-    if resume_enabled and resume_state.get("status") == "halted_provider_content_filter":
-        raise SystemExit(
-            "Training previously halted because the provider content policy blocked a request. "
-            "This is not a repairable corrupt-task resume case. Change provider/prompt policy "
-            "or start a fresh run after addressing the block."
-        )
-
-    if resume_enabled and resume_state.get("status") in {"in_progress", "halted_transient_connection_error"}:
+    if resume_enabled and resume_state.get("status") in {"in_progress", "halted_transient_connection_error", "halted_provider_content_filter"}:
         current_phase = resume_state.get("current_phase")
         active_iter = int(resume_state.get("current_iter", start_iter) or start_iter)
         if current_phase == "online_learning":
@@ -155,9 +148,10 @@ def main():
                 print("Training resume snapshot for diagnosis is incomplete; starting from configured entry point.")
                 resume_phase_override = None
         elif current_phase == "refinement":
-            tasks_path = f"{config.file_paths.train_output_dir}/train_tasks_record_diag_iter{active_iter}.json"
-            lib_path = f"{config.file_paths.lib_dir}/library_diag_iter{active_iter}.json"
-            taxo_path = f"{config.file_paths.lib_dir}/latest_taxonomy_diag_iter{active_iter}.json"
+            refine_paths = ((resume_state.get("refinement") or {}).get(str(active_iter)) or {}).get("snapshot_paths", {})
+            tasks_path = refine_paths.get("tasks", f"{config.file_paths.train_output_dir}/train_tasks_record_diag_iter{active_iter}.json")
+            lib_path = refine_paths.get("library", f"{config.file_paths.lib_dir}/library_diag_iter{active_iter}.json")
+            taxo_path = refine_paths.get("taxonomy", f"{config.file_paths.lib_dir}/latest_taxonomy_diag_iter{active_iter}.json")
             if all(os.path.exists(p) for p in (tasks_path, lib_path, taxo_path)):
                 train_tasks = DataLoader(tasks_path, mode="learn", filter_success_num=None, reset=False)
                 repaired = repair_training_state(
@@ -289,6 +283,8 @@ def main():
             config=config, llm_evolve=llm_evolve,
             verbose=False, save_data=True, output_path=config.file_paths.train_output_dir,
             max_workers=8,
+            resume_state=resume_state if resume_enabled else None,
+            resume_state_path=resume_state_path if resume_enabled else None,
         )
         print("refinement_avg_gain:", avg_refinement_rate)
         # Save iteration metrics log for library evolution phase

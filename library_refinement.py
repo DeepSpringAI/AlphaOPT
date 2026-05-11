@@ -6,7 +6,7 @@ import os
 from tqdm.auto import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from src.utils import save_log_data, get_token_usage
+from src.utils import LLMContentFilterError, LLMTransientError, save_log_data, get_token_usage
 from src.experience_library import ExperienceLibrary
 from src.dataloader import DataLoader 
 from src.llm_retriever import LibraryRetrieval
@@ -23,6 +23,7 @@ from src.laminar_tracing import (
     set_trace_metadata,
     trace_span,
 )
+from src.resume_state import make_refinement_result, mark_training_halted, now_timestamp, save_json_state, task_key
 
 from src.prompts.prompts_evolve import PROMPT_INS_REFINEMENT
 
@@ -36,6 +37,8 @@ def run_library_refinement(
     save_data=False,
     output_path=None,
     max_workers=4,
+    resume_state=None,
+    resume_state_path: str | None = None,
 ):
     """
     Parallelize only the outer loop over insights.
@@ -103,6 +106,27 @@ def run_library_refinement(
                 },
             )
             return res
+          except (LLMContentFilterError, LLMTransientError) as exc:
+            trace_id = current_trace_id()
+            status = "provider_policy_blocked" if isinstance(exc, LLMContentFilterError) else "transient_connection_halt"
+            laminar_record_exception(root_span, exc)
+            add_span_tags(root_span, [status])
+            set_span_attributes(root_span, {"alphaopt.status": status, "alphaopt.laminar_trace_id": trace_id})
+            set_span_output(root_span, {"status": status, "error": str(exc)[:1000]})
+            record_trace_index(
+                output_path,
+                {
+                    "mode": "training",
+                    "phase": "refinement",
+                    "task_id": "",
+                    "iteration": iter,
+                    "insight_id": getattr(ins, "insight_id", None),
+                    "trace_id": trace_id,
+                    "status": status,
+                    "artifact_path": output_path,
+                },
+            )
+            raise
           except Exception as exc:
             trace_id = current_trace_id()
             laminar_record_exception(root_span, exc)
@@ -342,6 +366,30 @@ def run_library_refinement(
     # Results dictionaries (updated only in the main thread; no locks needed)
     refined_insights = {}         # {insight_id: [original_condition, refined_condition]}
     insight_distributions = {}    # {insight_id: {"positive": [...], "negative": [...], "unretrieved": [...]}}
+    refinement_state = {}
+    completed_insight_ids = set()
+    insight_results = {}
+    if resume_state is not None:
+        refinement_state = resume_state.setdefault("refinement", {}).setdefault(
+            str(iter),
+            {
+                "status": "in_progress",
+                "completed_insight_ids": [],
+                "insight_results": {},
+            },
+        )
+        completed_insight_ids = {task_key(insight_id) for insight_id in refinement_state.get("completed_insight_ids", [])}
+        insight_results = refinement_state.setdefault("insight_results", {})
+        for key, record in insight_results.items():
+            result = (record or {}).get("result") or {}
+            status = result.get("status")
+            if status not in {"accepted", "not_accepted", "provider_policy_blocked"}:
+                continue
+            result_iid = result.get("insight_id", key)
+            if "orig_condition" in result and "latest_condition" in result:
+                refined_insights[result_iid] = [result.get("orig_condition"), result.get("latest_condition")]
+            if isinstance(result.get("distributions"), dict):
+                insight_distributions[result_iid] = result["distributions"]
 
     # Preselect insights to run for proper tqdm progress
     candidate_insights = [ins for ins in llm_evolve.library]
@@ -349,22 +397,118 @@ def run_library_refinement(
     refined_ins_num = 0
     refinement_success_num = 0
     total_performance_gain = 0 
+    for record in insight_results.values():
+        result = (record or {}).get("result") or {}
+        status = result.get("status")
+        if status in {"accepted", "not_accepted", "provider_policy_blocked"}:
+            refined_ins_num += 1
+            total_performance_gain += float(result.get("performance_gain", 0) or 0)
+        if status == "accepted":
+            refinement_success_num += 1
 
     # Track token usage before refinement
     usage_before = get_token_usage()
 
+    def _write_refinement_partial_artifacts() -> None:
+        if save_data and output_path:
+            refined_ins_list = [
+                {
+                    "insight_id": insight_id,
+                    "original_condition": conds[0],
+                    "refined_condition": conds[1]
+                }
+                for insight_id, conds in refined_insights.items()
+            ]
+            save_log_data(refined_ins_list, f"{output_path}/refined_insights_iter{iter}_partial.json")
+            save_log_data(insight_distributions, f"{output_path}/refined_insight_distributions_iter{iter}_partial.json")
+        if resume_state is not None and resume_state_path:
+            refinement_state["snapshot_paths"] = {
+                "library": f"{config.file_paths.lib_dir}/library_diag_iter{iter}.json",
+                "taxonomy": f"{config.file_paths.lib_dir}/latest_taxonomy_diag_iter{iter}.json",
+                "tasks": f"{config.file_paths.train_output_dir}/train_tasks_record_diag_iter{iter}.json",
+                "partial_refined_insights": f"{output_path}/refined_insights_iter{iter}_partial.json" if output_path else None,
+                "partial_refined_distributions": f"{output_path}/refined_insight_distributions_iter{iter}_partial.json" if output_path else None,
+            }
+            refinement_state["completed_insight_ids"] = sorted(completed_insight_ids)
+            refinement_state["insight_results"] = insight_results
+            resume_state["current_phase"] = "refinement"
+            resume_state["current_iter"] = int(iter)
+            resume_state["updated_at"] = now_timestamp()
+            save_json_state(resume_state_path, resume_state)
+
     # Thread pool over insights only
-    with ThreadPoolExecutor(max_workers=max_workers) as ex, tqdm(total=total, desc=f"[Iteration {iter}] Library Refinement") as pbar:
-        future_map = {ex.submit(_process_one_insight, ins): ins.insight_id for ins in candidate_insights}
+    executor = None
+    try:
+      executor = ThreadPoolExecutor(max_workers=max_workers)
+      with tqdm(total=total, initial=len(completed_insight_ids), desc=f"[Iteration {iter}] Library Refinement") as pbar:
+        future_map = {
+            executor.submit(_process_one_insight, ins): ins.insight_id
+            for ins in candidate_insights
+            if task_key(ins.insight_id) not in completed_insight_ids
+        }
         for fut in as_completed(future_map):
-            pbar.update(1)
+            iid = future_map[fut]
             try:
                 res = fut.result()
+            except LLMContentFilterError as exc:
+                print(f"\n   [WARNING] Insight {iid}: provider policy blocked refinement; recording blocked insight and continuing.\n")
+                res = {
+                    "insight_id": iid,
+                    "orig_condition": None,
+                    "latest_condition": None,
+                    "distributions": {},
+                    "performance_gain": 0,
+                    "refinement_accepted": False,
+                    "provider_policy_blocked": True,
+                    "report": f"\nProvider policy blocked refinement for insight {iid}; skipped mutation.",
+                    "error": str(exc)[:4000],
+                }
+                record_trace_index(
+                    output_path,
+                    {
+                        "mode": "training",
+                        "phase": "refinement",
+                        "iteration": iter,
+                        "insight_id": iid,
+                        "trace_id": current_trace_id(),
+                        "status": "provider_policy_blocked",
+                        "artifact_path": output_path,
+                    },
+                )
+            except LLMTransientError as exc:
+                for pending_future in future_map:
+                    if pending_future is not fut:
+                        pending_future.cancel()
+                if resume_state is not None and resume_state_path:
+                    refinement_state["status"] = "halted_transient_connection_error"
+                    mark_training_halted(
+                        resume_state,
+                        phase="refinement",
+                        iter=iter,
+                        status="halted_transient_connection_error",
+                        unit_id=iid,
+                        error=exc,
+                    )
+                    _write_refinement_partial_artifacts()
+                if executor is not None:
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    executor = None
+                raise
             except Exception:
                 traceback.print_exc()
+                pbar.update(1)
                 continue
             # The insight do not have negatvie or unretrieved tasks
             if not res:
+                completed_insight_ids.add(task_key(iid))
+                if resume_state is not None and resume_state_path:
+                    insight_results[task_key(iid)] = make_refinement_result(
+                        insight_id=iid,
+                        status="skipped",
+                        result={"status": "skipped"},
+                    )
+                    _write_refinement_partial_artifacts()
+                pbar.update(1)
                 continue
 
             refined_ins_num += 1 
@@ -372,10 +516,25 @@ def run_library_refinement(
             if res.get("refinement_accepted"):
                 refinement_success_num += 1
             iid = res["insight_id"]
-            refined_insights[iid] = [res["orig_condition"], res["latest_condition"]]
-            insight_distributions[iid] = res["distributions"]
+            status = "provider_policy_blocked" if res.get("provider_policy_blocked") else ("accepted" if res.get("refinement_accepted") else "not_accepted")
+            if not res.get("provider_policy_blocked"):
+                refined_insights[iid] = [res["orig_condition"], res["latest_condition"]]
+                insight_distributions[iid] = res["distributions"]
+            completed_insight_ids.add(task_key(iid))
+            if resume_state is not None and resume_state_path:
+                insight_results[task_key(iid)] = make_refinement_result(
+                    insight_id=iid,
+                    status=status,
+                    result={**res, "status": status},
+                    error=res.get("error"),
+                )
+                _write_refinement_partial_artifacts()
             # Print once per completed insight to avoid interleaved outputs from threads
             print(res["report"])
+            pbar.update(1)
+    finally:
+      if executor is not None:
+        executor.shutdown(wait=True)
 
     # persist results
     if save_data and output_path:
@@ -389,6 +548,19 @@ def run_library_refinement(
         ]
         save_log_data(refined_ins_list, f"{output_path}/refined_insights_iter{iter}.json")
         save_log_data(insight_distributions, f"{output_path}/refined_insight_distributions_iter{iter}.json")
+    if resume_state is not None and resume_state_path:
+        refinement_state["status"] = "completed"
+        refinement_state["completed_insight_ids"] = sorted(completed_insight_ids)
+        refinement_state["insight_results"] = insight_results
+        refinement_state["snapshot_paths"] = {
+            "library": f"{config.file_paths.lib_dir}/library_diag_iter{iter}.json",
+            "taxonomy": f"{config.file_paths.lib_dir}/latest_taxonomy_diag_iter{iter}.json",
+            "tasks": f"{config.file_paths.train_output_dir}/train_tasks_record_diag_iter{iter}.json",
+            "refined_insights": f"{output_path}/refined_insights_iter{iter}.json" if output_path else None,
+            "refined_distributions": f"{output_path}/refined_insight_distributions_iter{iter}.json" if output_path else None,
+        }
+        resume_state["updated_at"] = now_timestamp()
+        save_json_state(resume_state_path, resume_state)
     
     # Calculate the average refinement again (the average proportion of solved retrieval-misaligned tasks per insight)
     avg_refinement_rate = total_performance_gain / refined_ins_num if refined_ins_num else 0

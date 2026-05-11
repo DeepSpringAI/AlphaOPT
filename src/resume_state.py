@@ -57,6 +57,99 @@ def _contains_experiment_error(value: Any) -> bool:
     return False
 
 
+def _record_status(record: dict[str, Any] | None) -> str | None:
+    if not isinstance(record, dict):
+        return None
+    result = record.get("result") or {}
+    trace = record.get("trace") or {}
+    return (
+        result.get("status")
+        or trace.get("first_status")
+        or record.get("status")
+    )
+
+
+def is_provider_policy_blocked_record(record: dict[str, Any] | None) -> bool:
+    return _record_status(record) == "provider_policy_blocked"
+
+
+def is_repairable_training_record(record: dict[str, Any] | None) -> bool:
+    if not isinstance(record, dict):
+        return True
+    if is_provider_policy_blocked_record(record):
+        return False
+    status = _record_status(record)
+    if status in {"experiment_error", "no_attempts"}:
+        return True
+    return _contains_experiment_error(record)
+
+
+def make_training_task_result(
+    *,
+    task: Any,
+    status: str,
+    is_success: bool = False,
+    is_execution: Any = None,
+    is_verify: Any = None,
+    is_diagnosis: Any = None,
+    is_self_explore: Any = None,
+    laminar_trace_id: str | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "status": status,
+        "is_success": bool(is_success),
+        "is_execution": is_execution,
+        "is_verify": is_verify,
+        "is_diagnosis": is_diagnosis,
+        "is_self_explore": is_self_explore,
+        "laminar_trace_id": laminar_trace_id,
+    }
+    if error:
+        payload["error"] = str(error)[:4000]
+    return {
+        "result": payload,
+        "task_record": task.to_dict(mode="learn") if hasattr(task, "to_dict") else {"task_id": task_key(getattr(task, "id", None))},
+        "completed_at": now_timestamp(),
+    }
+
+
+def make_refinement_result(
+    *,
+    insight_id: Any,
+    status: str,
+    result: dict[str, Any] | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    payload = {"status": status, "insight_id": insight_id, **(result or {})}
+    if error:
+        payload["error"] = str(error)[:4000]
+    return {
+        "result": payload,
+        "completed_at": now_timestamp(),
+    }
+
+
+def mark_training_halted(
+    state: dict[str, Any],
+    *,
+    phase: str,
+    iter: int,
+    status: str,
+    unit_id: Any,
+    error: BaseException | Exception,
+) -> None:
+    state["status"] = status
+    state["current_phase"] = phase
+    state["current_iter"] = int(iter)
+    state["halt_reason"] = status
+    state["halted_phase"] = phase
+    state["halted_unit_id"] = task_key(unit_id)
+    state["halted_error_type"] = error.__class__.__name__
+    state["halted_error"] = str(error)[:4000]
+    state["updated_at"] = now_timestamp()
+
+
 def is_repairable_evaluation_record(record: dict[str, Any] | None) -> bool:
     if not isinstance(record, dict):
         return True
@@ -129,16 +222,17 @@ def repair_training_state(
         return []
     repaired: set[str] = set()
 
-    for phase_name in ("diagnosis",):
+    for phase_name in ("online_learning", "diagnosis"):
         phase = state.get(phase_name) or {}
-        for iter_state in phase.values():
+        iter_states = phase.values() if phase_name == "diagnosis" else [phase]
+        for iter_state in iter_states:
             if not isinstance(iter_state, dict):
                 continue
             task_results = iter_state.get("task_results") or {}
             bad_keys = [
                 key
                 for key, record in list(task_results.items())
-                if _contains_experiment_error(record)
+                if is_repairable_training_record(record)
             ]
             for key in bad_keys:
                 task_results.pop(key, None)
@@ -151,10 +245,17 @@ def repair_training_state(
     online_state = state.get("online_learning") or {}
     if tasks is not None:
         task_list = list(tasks)
+        online_results = online_state.get("task_results") or {}
+        blocked_ids = {
+            task_key(task_id)
+            for task_id, record in online_results.items()
+            if is_provider_policy_blocked_record(record)
+        }
         corrupt_indices = [
             idx
             for idx, task in enumerate(task_list)
-            if _contains_experiment_error(getattr(task, "output_status", []))
+            if task_key(getattr(task, "id", None)) not in blocked_ids
+            and _contains_experiment_error(getattr(task, "output_status", []))
         ]
         if corrupt_indices:
             first_idx = min(corrupt_indices)
@@ -164,6 +265,24 @@ def repair_training_state(
             online_state["completed_task_ids"] = [task.id for task in task_list[:rewind_to]]
             online_state["status"] = "in_progress"
             repaired.update(task_key(task_list[idx].id) for idx in corrupt_indices)
+
+    refinement = state.get("refinement") or {}
+    for iter_state in refinement.values():
+        if not isinstance(iter_state, dict):
+            continue
+        insight_results = iter_state.get("insight_results") or {}
+        bad_keys = [
+            key
+            for key, record in list(insight_results.items())
+            if is_repairable_training_record(record)
+        ]
+        for key in bad_keys:
+            insight_results.pop(key, None)
+            repaired.add(key)
+        if bad_keys:
+            completed_ids = [task_key(insight_id) for insight_id in iter_state.get("completed_insight_ids", [])]
+            iter_state["completed_insight_ids"] = [insight_id for insight_id in completed_ids if insight_id not in set(bad_keys)]
+            iter_state["status"] = "in_progress"
 
     if repaired:
         state.setdefault("repair_history", []).append(
@@ -210,6 +329,7 @@ def default_training_state(*, config_path: str, library_subdir: str) -> dict[str
         "online_learning": {
             "next_batch_start": 0,
             "completed_task_ids": [],
+            "task_results": {},
             "status": "pending",
         },
         "diagnosis": {},
