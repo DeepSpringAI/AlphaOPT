@@ -572,6 +572,11 @@ def prepare_dataset_config(base_config: Any, dataset: str) -> Any:
     return dataset_config
 
 
+def get_evaluation_run_output_folder(base_output_folder: str, run_idx: int) -> str:
+    """Return the per-run evaluation output folder for every n_runs value."""
+    return f"{base_output_folder}/run_{run_idx}"
+
+
 def evaluate_single_dataset(config: Any, dataset: str) -> dict:
     """
     Evaluate a single dataset
@@ -660,7 +665,7 @@ def evaluate_single_dataset(config: Any, dataset: str) -> dict:
     per_run_results: List[dict] = []
 
     for run_idx in range(1, n_runs + 1):
-        run_output_folder = f"{base_output_folder}/run_{run_idx}" if n_runs > 1 else base_output_folder
+        run_output_folder = get_evaluation_run_output_folder(base_output_folder, run_idx)
         dataset_config.output_folder = run_output_folder
 
         # Load test tasks fresh each run (avoid accumulating records in memory)
