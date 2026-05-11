@@ -3,7 +3,7 @@ advanced_model: gpt-5.5
 base_service: http://127.0.0.1:4010/v1
 advanced_service: http://127.0.0.1:4010/v1
 reasoning_effort: medium # OpenAI-compatible services only; set null/off to omit
-verbose: false
+verbose: true
 start_iter: 0
 data_slice:
 
