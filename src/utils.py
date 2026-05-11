@@ -974,6 +974,7 @@ def call_llm_and_parse_with_retry(
     reasoning_effort: str | None = None,
     max_retry: int = 3,
     sleep_sec: float = 2,
+    request_timeout_sec: float | None = None,
     transient_max_elapsed_sec: float | None = None,
     transient_max_sleep_sec: float | None = None,
     verbose: bool = True,
@@ -1015,6 +1016,7 @@ def call_llm_and_parse_with_retry(
                     reasoning_effort=reasoning_effort,
                     max_retry=max_retry,
                     sleep_sec=sleep_sec,
+                    request_timeout_sec=request_timeout_sec,
                     transient_max_elapsed_sec=transient_max_elapsed_sec,
                     transient_max_sleep_sec=transient_max_sleep_sec,
                     verbose=verbose,
@@ -1080,6 +1082,14 @@ def call_llm_and_parse_with_retry(
     request_reasoning_effort = (
         resolved_reasoning_effort if _supports_reasoning_effort(vendor, model) else None
     )
+    if request_timeout_sec is None:
+        request_timeout_sec = float(
+            os.getenv(
+                "ALPHAOPT_LLM_REQUEST_TIMEOUT_SEC",
+                _runtime_config_value("llm_retry.request_timeout_sec", 120),
+            )
+        )
+    request_timeout_sec = max(1.0, float(request_timeout_sec))
 
     def _send_request() -> tuple[str, dict]:
         """
@@ -1092,7 +1102,8 @@ def call_llm_and_parse_with_retry(
             create_params = {
                 "model": model,
                 "messages": msgs,
-                "temperature": temperature
+                "temperature": temperature,
+                "timeout": request_timeout_sec,
             }
             if request_reasoning_effort:
                 create_params["reasoning_effort"] = request_reasoning_effort
@@ -1603,6 +1614,17 @@ def call_llm_and_parse_with_retry(
 
             elapsed = time.monotonic() - retry_started_at
             is_transient = bool(err_info.get("is_transient"))
+            if err_info["is_content_filter"]:
+                detail = (
+                    f"\nLLM request blocked by provider content policy after {attempt} attempt(s)"
+                    f"\nType: {err_info['kind']}"
+                    f"\nStatus: {err_info['status_code']}"
+                    f"\nElapsed: {elapsed:.1f}s"
+                    f"{trace_hint}"
+                    f"\nContent filter details: {err_info['content_filter_result']}"
+                )
+                message = (error_message or detail) + detail if error_message else detail
+                raise LLMContentFilterError(message, error_info=err_info) from err
             retry_window_exhausted = is_transient and elapsed >= float(transient_max_elapsed_sec)
             parse_retry_exhausted = (not is_transient) and attempt >= max_retry
 
@@ -1615,11 +1637,7 @@ def call_llm_and_parse_with_retry(
                     f"\nElapsed: {elapsed:.1f}s"
                     f"{trace_hint}"
                 )
-                if err_info["is_content_filter"]:
-                    detail += f"\nContent filter details: {err_info['content_filter_result']}"
                 message = (error_message or detail) + detail if error_message else detail
-                if err_info["is_content_filter"]:
-                    raise LLMContentFilterError(message, error_info=err_info) from err
                 if is_transient:
                     raise LLMTransientError(message, error_info=err_info) from err
                 raise RuntimeError(message) from err

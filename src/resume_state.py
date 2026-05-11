@@ -64,6 +64,8 @@ def is_repairable_evaluation_record(record: dict[str, Any] | None) -> bool:
     trace = record.get("trace") or {}
     status = result.get("status") or trace.get("first_status")
     attempts = trace.get("attempts")
+    if status == "provider_policy_blocked":
+        return False
     if status in {"experiment_error", "no_attempts"}:
         return True
     if attempts == [] and (trace.get("error") or status is None):

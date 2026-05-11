@@ -94,6 +94,48 @@ def evaluate(
             print(f"Repaired evaluation resume state; re-running {len(repaired_task_ids)} task(s): {', '.join(repaired_task_ids)}")
             save_json_state(resume_state_path, prior_state)
     completed_tasks = prior_state.setdefault("completed_tasks", {})
+    if resume_enabled and prior_state.get("status") == "halted_provider_content_filter":
+        blocked_ids = [task_key(task.id) for task in tasks if task_key(task.id) not in completed_tasks]
+        if not blocked_ids and prior_state.get("halted_task_id"):
+            blocked_ids = [task_key(prior_state.get("halted_task_id"))]
+        task_by_key = {task_key(task.id): task for task in tasks}
+        for blocked_id in blocked_ids:
+            task = task_by_key.get(blocked_id)
+            if task is not None:
+                task.output_status.append("provider_policy_blocked")
+                task_record = task.to_dict(mode="learn")
+                task_id = task.id
+            else:
+                task_record = {"task_id": blocked_id, "output_status": ["provider_policy_blocked"]}
+                task_id = blocked_id
+            completed_tasks[blocked_id] = {
+                "task_id": task_id,
+                "result": {
+                    "pass_at_1_success": 0,
+                    "pass_at_1_runnable": 0,
+                    "pass_at_k_success": 0,
+                    "pass_at_k_runnable": 0,
+                    "status": "provider_policy_blocked",
+                },
+                "trace": {
+                    "retrieved_insight_ids": [],
+                    "attempts": [],
+                    "first_status": "provider_policy_blocked",
+                    "error": prior_state.get("halted_error", "provider content policy blocked this task"),
+                },
+                "task_record": task_record,
+                "completed_at": now_timestamp(),
+            }
+        if blocked_ids:
+            print(
+                "Provider policy blocked "
+                f"{len(blocked_ids)} task(s); marking as provider_policy_blocked and continuing: "
+                f"{', '.join(blocked_ids)}"
+            )
+        repair_evaluation_state(prior_state, enabled=False)
+        prior_state["status"] = "in_progress"
+        prior_state["updated_at"] = now_timestamp()
+        save_json_state(resume_state_path, prior_state)
     aggregate = prior_state.setdefault(
         "aggregate",
         {
@@ -422,71 +464,86 @@ def evaluate(
     ]
 
     progress = tqdm(total=len(tasks), initial=len(completed_tasks), desc="Evaluating\n")
+    executor = None
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-            futures = {
-                executor.submit(process_task, task, output_dir): (idx, task)
-                for idx, task, output_dir in pending
-            }
-            for future in concurrent.futures.as_completed(futures):
-                idx, task = futures[future]
-                try:
-                    opt, run, pass_k, pass_k_run, trace_payload = future.result()
-                except (LLMTransientError, LLMContentFilterError) as exc:
-                    for pending_future in futures:
-                        if pending_future is not future:
-                            pending_future.cancel()
-                    prior_state["status"] = (
-                        "halted_provider_content_filter"
-                        if isinstance(exc, LLMContentFilterError)
-                        else "halted_transient_connection_error"
-                    )
-                    prior_state["updated_at"] = now_timestamp()
-                    save_json_state(resume_state_path, prior_state)
-                    raise
-                except Exception as exc:
-                    opt, run, pass_k, pass_k_run = 0, 0, 0, 0
-                    trace_payload = {
-                        "retrieved_insight_ids": [],
-                        "attempts": [],
-                        "first_status": "experiment_error",
-                        "error": repr(exc),
-                    }
-                    task.output_status.append("experiment_error")
-                key = task_key(task.id)
-                completed_tasks[key] = {
-                    "task_id": task.id,
-                    "result": {
-                        "pass_at_1_success": int(opt),
-                        "pass_at_1_runnable": int(run),
-                        "pass_at_k_success": int(pass_k),
-                        "pass_at_k_runnable": int(pass_k_run),
-                        "status": trace_payload.get("first_status"),
-                    },
-                    "trace": trace_payload,
-                    "task_record": task.to_dict(mode="learn"),
-                    "completed_at": now_timestamp(),
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=6)
+        futures = {
+            executor.submit(process_task, task, output_dir): (idx, task)
+            for idx, task, output_dir in pending
+        }
+        for future in concurrent.futures.as_completed(futures):
+            idx, task = futures[future]
+            try:
+                opt, run, pass_k, pass_k_run, trace_payload = future.result()
+            except LLMContentFilterError as exc:
+                opt, run, pass_k, pass_k_run = 0, 0, 0, 0
+                trace_payload = {
+                    "retrieved_insight_ids": [],
+                    "attempts": [],
+                    "first_status": "provider_policy_blocked",
+                    "error": str(exc)[:4000],
                 }
-                aggregate["n_success"] += int(opt)
-                aggregate["n_runnable"] += int(run)
-                aggregate["n_pass_at_k_success"] += int(pass_k)
-                aggregate["n_pass_at_k_runnable"] += int(pass_k_run)
-                current_delta = {}
-                usage_after_partial = get_token_usage()
-                for vendor, stats_after in usage_after_partial.items():
-                    stats_before = usage_before.get(vendor, {})
-                    current_delta[vendor] = {
-                        k: float(stats_after.get(k, 0.0) - stats_before.get(k, 0.0))
-                        for k in ("requests", "prompt_tokens", "completion_tokens", "total_tokens", "cost")
-                    }
-                prior_state["token_usage_delta_total"] = add_metric_totals(prior_token_usage_delta, current_delta)
+                task.output_status.append("provider_policy_blocked")
+            except LLMTransientError as exc:
+                for pending_future in futures:
+                    if pending_future is not future:
+                        pending_future.cancel()
+                halted_status = "halted_transient_connection_error"
+                prior_state["status"] = halted_status
+                prior_state["halt_reason"] = halted_status
+                prior_state["halted_task_id"] = task.id
+                prior_state["halted_error_type"] = exc.__class__.__name__
+                prior_state["halted_error"] = str(exc)[:4000]
                 prior_state["updated_at"] = now_timestamp()
                 save_json_state(resume_state_path, prior_state)
-                Path(tasks_save_path).parent.mkdir(parents=True, exist_ok=True)
-                test_loader = DataLoader(task_list=list(tasks))
-                test_loader.save_as_json(tasks_save_path)
-                progress.update(1)
+                executor.shutdown(wait=False, cancel_futures=True)
+                executor = None
+                raise
+            except Exception as exc:
+                opt, run, pass_k, pass_k_run = 0, 0, 0, 0
+                trace_payload = {
+                    "retrieved_insight_ids": [],
+                    "attempts": [],
+                    "first_status": "experiment_error",
+                    "error": repr(exc),
+                }
+                task.output_status.append("experiment_error")
+            key = task_key(task.id)
+            completed_tasks[key] = {
+                "task_id": task.id,
+                "result": {
+                    "pass_at_1_success": int(opt),
+                    "pass_at_1_runnable": int(run),
+                    "pass_at_k_success": int(pass_k),
+                    "pass_at_k_runnable": int(pass_k_run),
+                    "status": trace_payload.get("first_status"),
+                },
+                "trace": trace_payload,
+                "task_record": task.to_dict(mode="learn"),
+                "completed_at": now_timestamp(),
+            }
+            aggregate["n_success"] += int(opt)
+            aggregate["n_runnable"] += int(run)
+            aggregate["n_pass_at_k_success"] += int(pass_k)
+            aggregate["n_pass_at_k_runnable"] += int(pass_k_run)
+            current_delta = {}
+            usage_after_partial = get_token_usage()
+            for vendor, stats_after in usage_after_partial.items():
+                stats_before = usage_before.get(vendor, {})
+                current_delta[vendor] = {
+                    k: float(stats_after.get(k, 0.0) - stats_before.get(k, 0.0))
+                    for k in ("requests", "prompt_tokens", "completion_tokens", "total_tokens", "cost")
+                }
+            prior_state["token_usage_delta_total"] = add_metric_totals(prior_token_usage_delta, current_delta)
+            prior_state["updated_at"] = now_timestamp()
+            save_json_state(resume_state_path, prior_state)
+            Path(tasks_save_path).parent.mkdir(parents=True, exist_ok=True)
+            test_loader = DataLoader(task_list=list(tasks))
+            test_loader.save_as_json(tasks_save_path)
+            progress.update(1)
     finally:
+        if executor is not None:
+            executor.shutdown(wait=True)
         progress.close()
 
     n_success = int(aggregate.get("n_success", 0))

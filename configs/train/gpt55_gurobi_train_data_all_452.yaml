@@ -10,6 +10,7 @@ repair: true
 data_slice:
 
 llm_retry:
+  request_timeout_sec: 120
   transient_max_elapsed_sec: 900
   transient_max_sleep_sec: 300
 

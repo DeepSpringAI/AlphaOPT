@@ -98,7 +98,14 @@ def main():
                 return json.load(f)
         return []
 
-    if resume_enabled and resume_state.get("status") in {"in_progress", "halted_transient_connection_error", "halted_provider_content_filter"}:
+    if resume_enabled and resume_state.get("status") == "halted_provider_content_filter":
+        raise SystemExit(
+            "Training previously halted because the provider content policy blocked a request. "
+            "This is not a repairable corrupt-task resume case. Change provider/prompt policy "
+            "or start a fresh run after addressing the block."
+        )
+
+    if resume_enabled and resume_state.get("status") in {"in_progress", "halted_transient_connection_error"}:
         current_phase = resume_state.get("current_phase")
         active_iter = int(resume_state.get("current_iter", start_iter) or start_iter)
         if current_phase == "online_learning":
