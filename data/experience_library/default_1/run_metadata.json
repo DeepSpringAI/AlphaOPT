@@ -1,0 +1,17 @@
+{
+  "library_subdir": "default_1",
+  "config_path": "configs/train/default.yaml",
+  "created_at": "2026-05-16T11:24:38+0330",
+  "dataset": "train_data_all_452",
+  "output_folder": "train_data_all_452_flash",
+  "lib_dir": "/home/oak/pr/de/agent-testing/AlphaOPT/data/experience_library/default_1",
+  "train_output_dir": "./learning/train_data_all_452_flash/",
+  "shared_artifact_subdir": "shared",
+  "models": {
+    "base_model": "google/gemini-2.5-flash",
+    "advanced_model": "google/gemini-2.5-flash",
+    "base_service": "openrouter",
+    "advanced_service": "openrouter",
+    "reasoning_effort": "medium"
+  }
+}

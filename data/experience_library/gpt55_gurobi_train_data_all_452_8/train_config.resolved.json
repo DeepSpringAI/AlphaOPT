@@ -1,0 +1,94 @@
+{
+  "base_model": "gpt-5.5",
+  "advanced_model": "gpt-5.5",
+  "base_service": "http://127.0.0.1:4010/v1",
+  "advanced_service": "http://127.0.0.1:4010/v1",
+  "reasoning_effort": "medium",
+  "verbose": true,
+  "start_iter": 0,
+  "resume": true,
+  "repair": true,
+  "data_slice": null,
+  "llm_retry": {
+    "request_timeout_sec": 120,
+    "transient_max_elapsed_sec": 900,
+    "transient_max_sleep_sec": 300
+  },
+  "api_keys": {
+    "OPEN_ROUTER_KEY": null,
+    "GEMINI_API_KEY": null,
+    "OPENAI_API_KEY": null
+  },
+  "params": {
+    "num_iterations": 1,
+    "batch_size": 12,
+    "tolerance": 1e-06,
+    "max_solution_attempts": 1,
+    "max_verify_attempts": 3,
+    "variant_num": 5
+  },
+  "dataset": "train_data_all_452",
+  "output_folder": "e2_gpt55_gurobi_train_data_all_452",
+  "library_subdir": "gpt55_gurobi_train_data_all_452_8",
+  "shared_artifact_subdir": "shared",
+  "file_paths": {
+    "train_data_path": "./data/optimization_tasks/train/train_data_all_452.json",
+    "train_output_dir": "./learning/e2_gpt55_gurobi_train_data_all_452/",
+    "lib_dir": "/home/oak/pr/de/agent-testing/AlphaOPT/data/experience_library/gpt55_gurobi_train_data_all_452_8",
+    "metrics_log_path": "./learning/e2_gpt55_gurobi_train_data_all_452/iteration_metrics.json"
+  },
+  "ablation": {
+    "taxonomy": true,
+    "rewrite": false,
+    "include_example": true,
+    "include_program_insight": true,
+    "max_debug_retry": 3
+  },
+  "pricing": {
+    "gemini": {
+      "gemini-2.5-pro": {
+        "prompt_per_million": 1.25,
+        "completion_per_million": 10.0
+      },
+      "gemini-2.5-flash": {
+        "prompt_per_million": 0.3,
+        "completion_per_million": 2.5
+      }
+    },
+    "openai": {
+      "gpt-4o": {
+        "prompt_per_million": 2.5,
+        "completion_per_million": 10.0
+      },
+      "gpt-4o-mini": {
+        "prompt_per_million": 0.15,
+        "completion_per_million": 0.6
+      },
+      "gpt-4.1": {
+        "prompt_per_million": 2.0,
+        "completion_per_million": 8.0
+      },
+      "gpt-5.2": {
+        "prompt_per_million": 0.0,
+        "completion_per_million": 0.0
+      },
+      "gpt-5.5": {
+        "prompt_per_million": 5.0,
+        "completion_per_million": 30.0
+      },
+      "gpt-5.5-pro": {
+        "prompt_per_million": 30.0,
+        "completion_per_million": 180.0
+      },
+      "gpt-5.4": {
+        "prompt_per_million": 2.5,
+        "completion_per_million": 15.0
+      },
+      "gpt-5.4-mini": {
+        "prompt_per_million": 0.75,
+        "completion_per_million": 4.5
+      }
+    }
+  },
+  "experience_library_root": "/home/oak/pr/de/agent-testing/AlphaOPT/data/experience_library"
+}

@@ -128,10 +128,26 @@ services:
   app-server:
     image: docker.devneeds.ir/lmnr-ai/app-server
     pull_policy: missing
+    command:
+      - sh
+      - -lc
+      - |
+        for name in postgres clickhouse quickwit query-engine; do
+          i=0
+          until getent hosts "$$name" >/dev/null 2>&1; do
+            i=$$((i + 1))
+            if [ "$$i" -ge 60 ]; then
+              echo "Timed out waiting for Docker DNS name: $$name" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+        done
+        exec ./app-server
     ports:
-      - "${APP_SERVER_HOST_PORT:-8000}:8000"
-      - "${APP_SERVER_GRPC_HOST_PORT:-8001}:8001"
-      - "${APP_SERVER_RT_HOST_PORT:-8002}:8002"
+      - "${APP_SERVER_HOST_PORT:-18000}:8000"
+      - "${APP_SERVER_GRPC_HOST_PORT:-18001}:8001"
+      - "${APP_SERVER_RT_HOST_PORT:-18002}:8002"
     depends_on:
       postgres:
         condition: service_healthy

@@ -1,0 +1,1605 @@
+[
+  {
+    "insight_id": 2,
+    "taxonomy": {
+      "General Formulation": {
+        "Constraint Formulation": [
+          "Incorrect Relational Operators"
+        ]
+      }
+    },
+    "condition": "This insight applies when a cleaning-chemical optimization problem includes natural-language limits on chemical quantities, especially a total amount that can be used together with separate minimum-use and ratio restrictions. For example, when the problem statement mentioned that the company must use at least 100 units of the cleansing chemical, that in total at least 300 units of chemicals can be used per house, and that there can be at most twice the amount of cleansing chemical as odor-removing chemical.",
+    "explanation": "When the problem involves a total chemical-use limit, as in this case, the correct model bounds x + y above by 300 while keeping the minimum cleansing requirement and ratio constraint separate. The best practice is to align each inequality direction with the intended semantic role of the bound. A common mistake is to write x_C + x_O >= 300 instead of x + y <= 300, which happens because wording about an allowable total amount may be misread as a required minimum total amount. More generally, this reflects that reversing a relational operator changes the feasible region and can produce a different, non-optimal solution for the intended problem.",
+    "example": "# Wrong\nx_C + x_O >= 300   # Treats 300 as a minimum total usage requirement\n\n# Correct\nx + y <= 300       # Treats 300 as an upper limit on total chemical usage",
+    "iteration": 0,
+    "task_id": "A083",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      3
+    ],
+    "correctness": [
+      1
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 3,
+    "taxonomy": {
+      "General Formulation": {
+        "Objective Specification": [
+          "Sum vs. Makespan Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when multiple resources or machines can operate concurrently and the stated time criterion concerns elapsed time rather than accumulated resource-hours. For example, when the problem statement mentioned two different machines and asked how many hours each machine should be used to minimize the total time needed.",
+    "explanation": "When the problem involves two pharmacy machines whose operating hours can be chosen separately, elapsed completion time is the larger of the two machine usage times if the machines run in parallel. The best practice is to represent the elapsed time with an auxiliary makespan variable and minimize that variable subject to it being at least each machine's operating time. A common mistake is to minimize x1 + x2, which happens because 'total time' is interpreted as total machine-hours instead of calendar completion time. More generally, this reflects that parallel-resource time objectives should distinguish aggregate workload from makespan.",
+    "example": "# Wrong\nminimize x1 + x2\ns.t.\n  30 x1 + 45 x2 >= 1300\n  60 x1 + 30 x2 >= 1500\n  20 x1 + 15 x2 <= 1200\n  x1, x2 >= 0\n\n# Correct\nminimize H\ns.t.\n  30 x1 + 45 x2 >= 1300\n  60 x1 + 30 x2 >= 1500\n  20 x1 + 15 x2 <= 1200\n  H >= x1\n  H >= x2\n  x1, x2, H >= 0",
+    "iteration": 0,
+    "task_id": "A104",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      9,
+      1
+    ],
+    "correctness": [
+      7,
+      0
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [
+        "A236"
+      ],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 4,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision quantities represent indivisible counts rather than divisible amounts. For example, when the problem statement mentioned how many oranges and grapefruit the patient should eat, the variables represented counts of whole fruits.",
+    "explanation": "When the problem involves choosing numbers of physical items such as oranges and grapefruit, fractional values like 12.73 oranges are not meaningful unless the problem explicitly allows divisibility. The best practice is to model such item counts as integer decision variables. A common mistake is to declare them as continuous nonnegative variables, which happens because the modeler may focus on linearity and overlook the indivisible nature of the decisions. More generally, this reflects that variable domains must match the physical interpretation of the decision quantities.",
+    "example": "# Wrong\nx_O >= 0, x_G >= 0 continuous\n# This can allow a fractional solution such as x_O = 12.727..., x_G = 6.363...\n\n# Correct\nx_O, x_G nonnegative integers\n\n# Gurobi-style correction\nx_O = m.addVar(name=\"oranges\", lb=0, vtype=GRB.INTEGER)\nx_G = m.addVar(name=\"grapefruits\", lb=0, vtype=GRB.INTEGER)",
+    "iteration": 0,
+    "task_id": "A113",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      109
+    ],
+    "correctness": [
+      104
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 5,
+    "taxonomy": {
+      "General Formulation": {
+        "Constraint Formulation": [
+          "Linearization of Non-linear Forms"
+        ]
+      }
+    },
+    "condition": "This insight applies when a natural-language restriction limits a fraction of total activity attributable to one resource type, especially when both selected-unit counts and auxiliary activity variables could represent related quantities. For example, when the problem statement mentioned that only a maximum of 40% of the transportation can be using trolleys.",
+    "explanation": "When the problem involves limiting the trolley share of the total transportation provided by the chosen transportation methods. The best practice is to identify the intended numerator and denominator of the fraction before linearizing it, so the trolley contribution is represented by 7y and the total transportation contribution by 5x + 7y. A common mistake is to impose the fraction on auxiliary assigned-flow variables such as q_T <= 0.40(q_C + q_T), which happens because the ratio is linearized before confirming which modeled quantities actually represent the stated transportation share. More generally, this reflects that proportion constraints should be linearized only after the correct physical quantities in the ratio have been matched to decision variables or expressions.",
+    "example": "# Wrong\nq_T <= 0.40 * (q_C + q_T)\n\n# Correct\n7 * y <= 0.40 * (5 * x + 7 * y)\n# equivalently: 2 * x >= 4.2 * y",
+    "iteration": 0,
+    "task_id": "A198",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      61,
+      9
+    ],
+    "correctness": [
+      55,
+      3
+    ],
+    "distribution": {
+      "positive": [
+        "F057",
+        "F203",
+        "F131"
+      ],
+      "negative": [
+        "F102",
+        "F122",
+        "F135"
+      ],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 7,
+    "taxonomy": {
+      "General Formulation": {
+        "Objective Specification": [
+          "Expected-Value Objective Coefficients"
+        ]
+      }
+    },
+    "condition": "This insight applies when a model optimizes monetary returns under uncertain outcomes with stated probabilities. For example, when the problem statement mentioned losing probabilities of 50% for basketball, 25% for horse racing, and 10% for soccer together with payout rates for each bet.",
+    "explanation": "When the problem involves betting outcomes with probabilities of losing money and payouts conditional on not losing. The best practice is to use expected payout coefficients, multiplying each payout rate by the probability of not losing. A common mistake is to maximize the raw payout rates directly, which happens because the payout amount is confused with its expected monetary value under uncertainty. More generally, this reflects that objective coefficients in stochastic reward settings must represent the same expected-performance measure that the optimization problem is intended to maximize.",
+    "example": "# Wrong\n# Maximizes nominal payout rates and ignores the chance of losing\nmax 1.20*x_B + 0.50*x_H + 0.10*x_S\n\n# Correct\n# Maximizes expected payout: payout rate \u00d7 probability of not losing\nmax (1 - 0.50)*1.20*x_B + (1 - 0.25)*0.50*x_H + (1 - 0.10)*0.10*x_S\n# equivalently\nmax 0.60*x_B + 0.375*x_H + 0.09*x_S",
+    "iteration": 0,
+    "task_id": "A186",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [],
+    "correctness": [],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 8,
+    "taxonomy": {
+      "General Formulation": {
+        "Constraint Formulation": [
+          "Incorrect Relational Operators"
+        ]
+      }
+    },
+    "condition": "This insight applies when a problem statement gives a relative requirement using language such as at least, at most, no less than, no more than, or a minimum multiple relationship between two decision quantities. For example, when the problem statement mentioned that the woman must eat 2 times more protein bars than smoothies.",
+    "explanation": "When the problem involves a relative consumption requirement between protein bars and smoothies. The best practice is to translate the intended relationship into the correct inequality direction, so the number of bars is constrained to be at least twice the number of smoothies as in the gold-standard model. A common mistake is to model the relationship as an equality, which happens because phrases involving ratios or multiples are sometimes interpreted as an exact fixed proportion rather than a lower-bound relationship. More generally, this reflects that relational words in the problem statement determine whether a constraint should be equality, lower bound, or upper bound, and using equality can incorrectly remove feasible and potentially optimal solutions.",
+    "example": "# Wrong\n# Forces exactly two bars per smoothie and excludes solutions with more bars\nx_B = 2 * x_S\n\n# Correct\n# Allows the number of bars to be at least twice the number of smoothies\nx_B >= 2 * x_S\n\n# Gurobi-style\n# Wrong\nmodel.addConstr(y == 2 * x, name=\"relation\")\n\n# Correct\nmodel.addConstr(y >= 2 * x, name=\"relation\")",
+    "iteration": 0,
+    "task_id": "A235",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      175,
+      16
+    ],
+    "correctness": [
+      160,
+      8
+    ],
+    "distribution": {
+      "positive": [
+        "A093",
+        "A003",
+        "F057",
+        "F102",
+        "F152",
+        "F021",
+        "F163",
+        "B062"
+      ],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 9,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision quantities represent countable units rather than continuously divisible amounts. For example, when the problem statement mentioned units of fertilizer and units of seeds to be added to the lawn.",
+    "explanation": "When the problem involves choosing numbers of fertilizer and seed units, the decision variables should match the indivisible unit interpretation used by the intended formulation. The best practice is to declare fertilizer and seed quantities as integer variables when units are countable. A common mistake is to declare them as continuous nonnegative variables, which happens because linear programming notation often defaults to real-valued quantities even when the word 'units' implies discrete counts. More generally, this reflects that the domain of a decision variable is part of the mathematical model and must represent the physical granularity of the decision.",
+    "example": "# Wrong\nF = m.addVar(lb=0, vtype=GRB.CONTINUOUS, name=\"F\")\nS = m.addVar(lb=0, vtype=GRB.CONTINUOUS, name=\"S\")\n\n# Correct\nF = m.addVar(lb=0, vtype=GRB.INTEGER, name=\"F\")\nS = m.addVar(lb=0, vtype=GRB.INTEGER, name=\"S\")",
+    "iteration": 0,
+    "task_id": "A093",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      1,
+      2
+    ],
+    "correctness": [
+      1,
+      1
+    ],
+    "distribution": {
+      "positive": [
+        "A093"
+      ],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 10,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision quantities represent indivisible production counts rather than divisible flows or amounts. For example, when the problem statement mentioned how many reams or packages of graph paper and music paper should be produced in a day.",
+    "explanation": "When the problem involves producing countable units such as reams or packages of paper, the decision variables should match that discreteness. The best practice is to declare the production quantities as nonnegative integer variables when fractional units are not allowed. A common mistake is to model these quantities as continuous variables, which happens because the algebraic capacity constraints look like a standard linear program and fractional values may appear mathematically feasible. More generally, this reflects that the variable domain is part of the formulation and can change both feasibility and the optimal solution.",
+    "example": "# Wrong\nx_G >= 0, x_M >= 0\nmaximize 4 x_G + 2.5 x_M\nsubject to:\n  3 x_G + 1.5 x_M <= 350\n  5.5 x_G + 3 x_M <= 350\n\n# This permits the fractional solution x_G = 0, x_M = 350/3 = 116.67, profit = 291.67.\n\n# Correct\nx_G, x_M in Z_+\nmaximize 4 x_G + 2.5 x_M\nsubject to:\n  3 x_G + 1.5 x_M <= 350\n  5.5 x_G + 3 x_M <= 350\n\n# Gurobi-style declaration:\nx_G = model.addVar(lb=0, vtype=GRB.INTEGER, name=\"Graph_Paper\")\nx_M = model.addVar(lb=0, vtype=GRB.INTEGER, name=\"Music_Paper\")\n\n# The integer optimum is x_G = 2, x_M = 113, profit = 290.5.",
+    "iteration": 0,
+    "task_id": "A179",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      50
+    ],
+    "correctness": [
+      48
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 11,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision quantities represent production, usage, or serving levels that the intended formulation treats as divisible amounts rather than explicitly indivisible items. For example, when the problem statement mentioned minimizing the cost of a diet using hamburgers and chicken wraps without explicitly requiring whole-number servings, or when it mentioned how many palladium-heavy and platinum-heavy catalysts should be used without imposing a whole-number restriction.",
+    "explanation": "When the problem involves choosing levels of activities such as food servings or catalyst processes under resource, nutrition, or availability constraints, the decision variables may represent divisible continuous quantities. The best practice is to match the variable domain to the intended mathematical formulation and use nonnegative continuous variables unless the problem explicitly requires indivisible decisions. A common mistake is to impose integer restrictions on these variables, which happens because words like 'number,' 'servings,' or physical object names are assumed to imply whole units even though the target linear program allows fractional levels. More generally, this reflects that integrality should be added only when the problem explicitly requires indivisible decisions or when the intended model is a mixed-integer program; otherwise, it changes the feasible region and can produce a different objective value.",
+    "example": "# Wrong\n# Adds integrality and changes the problem from the continuous LP benchmark\nx_PdH, x_PtH \u2208 Z_{\u22650}\nmaximize 5*x_PdH + 4*x_PtH\ns.t. 15*x_PdH + 20*x_PtH <= 450\n     25*x_PdH + 14*x_PtH <= 390\n\n# Correct\n# Match the intended LP: nonnegative continuous variables\nx_PdH, x_PtH >= 0\nmaximize 5*x_PdH + 4*x_PtH\ns.t. 15*x_PdH + 20*x_PtH <= 450\n     25*x_PdH + 14*x_PtH <= 390\n\n# Same principle for a diet LP\n# Wrong: forcing whole servings without an explicit whole-serving requirement\nhamburgers, wraps \u2208 Z_{\u22650}\n\n# Correct: allow divisible serving amounts when the formulation is continuous\nhamburgers, wraps >= 0\n\n# Gurobi-style variable declaration\n# Wrong\nx = model.addVar(vtype=GRB.INTEGER, lb=0, name='palladium_heavy')\ny = model.addVar(vtype=GRB.INTEGER, lb=0, name='platinum_heavy')\n\n# Correct\nx = model.addVar(lb=0, name='palladium_heavy')\ny = model.addVar(lb=0, name='platinum_heavy')",
+    "iteration": 0,
+    "task_id": [
+      "A171",
+      "A223"
+    ],
+    "merge_version": 1,
+    "refine_version": 0,
+    "occurrence": [
+      82,
+      14
+    ],
+    "correctness": [
+      49,
+      4
+    ],
+    "distribution": {
+      "positive": [
+        "A236",
+        "F080",
+        "F019",
+        "F062"
+      ],
+      "negative": [
+        "A014",
+        "F167",
+        "F126",
+        "F152",
+        "F163",
+        "F091"
+      ],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 12,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision quantities may represent either continuously divisible amounts or indivisible unit counts, and the problem description or domain context indicates the intended granularity. For example, when the problem statement mentioned annual batches of hams and pork ribs, or units of sulfate and ginger in a shampoo mixture.",
+    "explanation": "When the problem involves choosing quantities such as production levels or ingredient units whose divisibility affects feasibility, the best practice is to define variable domains according to the intended modeling granularity: continuous for divisible production amounts unless integrality is explicitly required, and integer for indivisible unit counts. A common mistake is to impose integer restrictions on divisible quantities or to relax indivisible counts to continuous variables, which happens because terms such as \u201cbatch,\u201d \u201camount,\u201d or \u201cmixture\u201d can be interpreted inconsistently with the intended formulation. More generally, this reflects that incorrect variable-type assumptions change the feasible region and can produce either overly restrictive or overly optimistic optimization results.",
+    "example": "# Case 1: Divisible production quantities should remain continuous unless integrality is required\n\n# Wrong\nx_H, x_R \\in \\mathbb{Z}_+\n\n# Correct\nx_H, x_R \\ge 0\n\n# In Gurobi:\nx_H = m.addVar(name=\"Hams\", lb=0)\nx_R = m.addVar(name=\"Pork_Ribs\", lb=0)\n\n# Case 2: Indivisible ingredient units should be integer-valued\n\n# Wrong\nx_S >= 0, x_G >= 0 continuous\nminimize 0.5*x_S + 0.75*x_G\nsubject to:\n  x_S >= 100\n  x_S + x_G == 400\n  x_S <= 2*x_G\n# This allows fractional units such as x_S = 800/3, x_G = 400/3.\n\n# Correct\nS = m.addVar(name=\"S\", lb=0, vtype=GRB.INTEGER)\nG = m.addVar(name=\"G\", lb=0, vtype=GRB.INTEGER)\nm.setObjective(0.5*S + 0.75*G, GRB.MINIMIZE)\nm.addConstr(S >= 100)\nm.addConstr(S + G == 400)\nm.addConstr(S <= 2*G)\n# Integer feasibility gives S = 266, G = 134, objective = 233.5.",
+    "iteration": 0,
+    "task_id": [
+      "A172",
+      "A112"
+    ],
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      4,
+      1
+    ],
+    "correctness": [
+      1,
+      0
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [
+        "A172"
+      ],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 13,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision variables represent counts of indivisible physical items rather than divisible quantities. For example, when the problem statement mentioned how many salmon bowls and egg bowls the fitness guru should eat, each bowl is a discrete meal unit.",
+    "explanation": "When the problem involves choosing numbers of bowls, the decision variables represent indivisible counts. The best practice is to model the number of salmon bowls and egg bowls as integer nonnegative variables. A common mistake is to model them as continuous variables, which happens because calorie, protein, and sodium quantities are numerical and may make the model look like a continuous diet LP. More generally, this reflects that variables should be continuous only when fractional quantities are meaningful, and integer when the decision units are inherently countable and indivisible.",
+    "example": "# Wrong\nx_S >= 0, x_E >= 0 continuous\nmin 80 x_S + 20 x_E\ns.t. 300 x_S + 200 x_E >= 2000\n     15 x_S + 8 x_E >= 90\n     x_E <= (2/3) x_S\n\n# This can return fractional bowls, e.g., x_S = 60/13, x_E = 40/13.\n\n# Correct\nx_S, x_E nonnegative integers\nmin 80 x_S + 20 x_E\ns.t. 300 x_S + 200 x_E >= 2000\n     15 x_S + 8 x_E >= 90\n     x_E <= (2/3) x_S\n\n# Gurobi-style code:\nx_s = m.addVar(lb=0, vtype=GRB.INTEGER, name=\"Salmon\")\nx_e = m.addVar(lb=0, vtype=GRB.INTEGER, name=\"Eggs\")",
+    "iteration": 0,
+    "task_id": "A212",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      60,
+      2
+    ],
+    "correctness": [
+      58,
+      1
+    ],
+    "distribution": {
+      "positive": [
+        "F203"
+      ],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 14,
+    "taxonomy": {
+      "General Formulation": {
+        "Objective Specification": [
+          "Sum vs. Makespan Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when an optimization problem describes total accumulated time, cost, or effort across multiple activities, resources, machines, or trip types, rather than elapsed completion time. For example, when the problem statement mentioned two factories and asked how many hours each factory should be run to minimize the total time needed, or when it mentioned helicopter trips taking 1 hour and bus trips taking 3 hours to minimize total patient transport time.",
+    "explanation": "When the problem involves separate activity or resource-use decisions whose contributions accumulate, the objective should represent the total accumulated quantity. The best practice is to minimize the appropriate weighted sum, such as x_N + x_W for factory operating hours or 1h + 3b for helicopter and bus trip time. A common mistake is to introduce a makespan variable and minimize a maximum such as max{x_N, x_W}, which happens because phrases like 'total time needed' are incorrectly interpreted as parallel elapsed completion time rather than accumulated operating time. More generally, this reflects that objective wording must be resolved carefully before adding auxiliary variables or maximum-type constraints.",
+    "example": "# Wrong: models elapsed makespan instead of accumulated time\nmin H\ns.t. H >= x_N\n     H >= x_W\n\n# Correct: models total factory operating time\nmin x_N + x_W\n\n# Correct with different per-activity durations\nmin 1*h + 3*b",
+    "iteration": 0,
+    "task_id": [
+      "A165",
+      "F138"
+    ],
+    "merge_version": 1,
+    "refine_version": 0,
+    "occurrence": [
+      4,
+      4
+    ],
+    "correctness": [
+      2,
+      1
+    ],
+    "distribution": {
+      "positive": [
+        "F057"
+      ],
+      "negative": [
+        "A236",
+        "F019"
+      ],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 15,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision quantities represent counts of indivisible activities rather than divisible flows. For example, when the problem statement mentioned how many times each wood-burning process should be used, the decision variables represented counts of process uses.",
+    "explanation": "When the problem involves choosing the number of uses of each production process, fractional process counts such as using the no-catalyst process 50/3 times may not be valid if each use is an indivisible run. The best practice is to declare the process-use variables as nonnegative integers. A common mistake is to model these variables as continuous, which happens because the word 'integer' may not be explicitly stated even though the phrase 'how many uses' implies count decisions. More generally, this reflects that variable domains must follow the physical meaning of the decision, not only the algebraic convenience of the relaxation.",
+    "example": "# Wrong\nx_c, x_n \\in R_+\nmax 15 x_c + 18 x_n\ns.t. 10 x_c + 15 x_n <= 300\n     20 x_c + 12 x_n <= 300\n# This allows x_c = 5, x_n = 50/3, Z = 375.\n\n# Correct\nx_c, x_n \\in Z_+\nmax 15 x_c + 18 x_n\ns.t. 10 x_c + 15 x_n <= 300\n     20 x_c + 12 x_n <= 300\n# In Gurobi:\nx = model.addVars(processes, lb=0, vtype=GRB.INTEGER, name=\"x\")\n# Integer optimum: x_c = 3, x_n = 18, Z = 369.",
+    "iteration": 0,
+    "task_id": "F192",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      36,
+      13
+    ],
+    "correctness": [
+      25,
+      6
+    ],
+    "distribution": {
+      "positive": [
+        "F057",
+        "F134",
+        "F122",
+        "F135",
+        "B016",
+        "B062"
+      ],
+      "negative": [
+        "F021"
+      ],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 16,
+    "taxonomy": {
+      "General Formulation": {
+        "Constraint Formulation": [
+          "Incorrect Relational Operators"
+        ]
+      }
+    },
+    "condition": "This insight applies when a problem includes a comparative quantity constraint whose intended meaning is a non-strict ordering rather than a strict separation. For example, when the problem statement mentioned that goat curry is more popular and compared the number of goat curry bowls with the number of chicken curry bowls.",
+    "explanation": "When the problem involves comparing the number of goat and chicken curry bowls, the gold-standard formulation models the relation as goat_bowls >= chicken_bowls, so equality remains feasible. The best practice is to encode the intended non-strict ordering exactly and avoid adding a one-unit gap unless the requirement truly excludes equality. A common mistake is writing x_G >= x_C + 1, which happens because phrases such as \u201clarger than\u201d are interpreted as a strict integer inequality even when the validated formulation only requires \u201cat least as many.\u201d More generally, this reflects that relational operators can change the feasible set and objective value even in very small linear or integer programs.",
+    "example": "# Wrong\nx_G >= x_C + 1   # excludes equality and forces strictly more goat bowls\n\n# Correct\ngoat_bowls >= chicken_bowls   # matches the gold-standard non-strict comparison",
+    "iteration": 0,
+    "task_id": "F203",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      2
+    ],
+    "correctness": [
+      1
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 17,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision quantities represent indivisible counts rather than divisible amounts. For example, when the problem statement mentioned the number of batches of bagels and croissants produced per day, each batch is treated in the gold-standard formulation as an integer production count.",
+    "explanation": "When the problem involves choosing how many batches of each bakery product to produce. The best practice is to model batch counts as integer variables when batches are indivisible production units. A common mistake is to declare the batch variables as continuous, which happens because the word 'batch' may be interpreted as a scalable production amount rather than a countable unit. More generally, this reflects that variable domains must match the physical divisibility of the underlying decision quantities, since relaxing integer counts to continuous values can produce fractional production plans that are not feasible in the intended model.",
+    "example": "# Wrong\n# Allows fractional batches such as 28.8 bagel batches and 12.4 croissant batches\nx_B >= 0, x_C >= 0 continuous\n\n# Correct\n# Batch counts are integer decision variables\nbagels = model.addVar(lb=0, vtype=GRB.INTEGER, name=\"bagels\")\ncroissants = model.addVar(lb=0, vtype=GRB.INTEGER, name=\"croissants\")",
+    "iteration": 0,
+    "task_id": "F169",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      1,
+      1
+    ],
+    "correctness": [
+      1,
+      0
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [
+        "A033"
+      ],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 18,
+    "taxonomy": {
+      "General Formulation": {
+        "Constraint Formulation": [
+          "Incorrect Relational Operators"
+        ]
+      }
+    },
+    "condition": "This insight applies when a verbal comparison expresses a strict ordering between two decision quantities. For example, when the problem statement mentioned that Mark prefers to grow more cucumbers than potatoes.",
+    "explanation": "When the problem involves the statement that cucumbers must be more than potatoes, the intended relationship is a strict comparison rather than equality being allowed. The best practice is to encode that strict comparison consistently with the variable domain; with integer acreage variables, this becomes cucumbers at least one acre greater than potatoes. A common mistake is to replace 'more than' with 'at least as many as', which happens because mathematical programming solvers do not directly support strict inequalities and modelers may relax the strict relationship too far. More generally, this reflects that natural-language comparisons such as 'more than', 'less than', 'at least', and 'at most' must be translated carefully into solver-compatible non-strict inequalities without changing their logical meaning.",
+    "example": "# Wrong\nx_C >= x_P\n# Gurobi-style:\nmodel.addConstr(cucumbers >= potatoes, name=\"more_cucumbers_than_potatoes\")\n\n# Correct, with integer acreage variables\nx_C >= x_P + 1\n# Gurobi-style:\nmodel.addConstr(cucumbers >= potatoes + 1, name=\"more_cucumbers_than_potatoes\")",
+    "iteration": 0,
+    "task_id": "F163",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      4,
+      2
+    ],
+    "correctness": [
+      2,
+      0
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [
+        "F203"
+      ],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": [
+        "F163"
+      ]
+    }
+  },
+  {
+    "insight_id": 19,
+    "taxonomy": {
+      "General Formulation": {
+        "Constraint Formulation": [
+          "Incorrect Relational Operators"
+        ]
+      }
+    },
+    "condition": "This insight applies when a natural-language condition contains a strict comparison between decision variables. For example, when the problem statement mentioned that Ben prefers to grow more pears than apples.",
+    "explanation": "When the problem involves a strict relationship such as pears being more than apples, the best practice is to express it using a solver-supported non-strict inequality with the correct minimum separation implied by the variable domain. A common mistake is to write a strict constraint such as x_P > x_A, which happens because the phrase 'more than' is translated literally without accounting for how mathematical programming solvers represent feasible regions. More generally, this reflects that MILP solvers such as Gurobi accept non-strict linear inequalities, so strict comparisons over integer variables should be modeled with an explicit unit gap, such as x_P >= x_A + 1.",
+    "example": "# Wrong\nx_P > x_A\n\n# Correct, when acreage variables are integer\nx_P \\ge x_A + 1\n\n# Gurobi version\nmodel.addConstr(pear_acres >= apple_acres + 1, name=\"more_pears_than_apples\")",
+    "iteration": 0,
+    "task_id": "F152",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      0,
+      1
+    ],
+    "correctness": [
+      0,
+      0
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [
+        "F152"
+      ],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 20,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when the decision quantities are counts of naturally separate units rather than amounts measured on a continuous scale. For example, when the problem statement mentioned servings of health supplement A and health supplement B, gave nutrient contents and cost per serving, and asked how many servings of each supplement the patient needs each day.",
+    "explanation": "When the problem involves choosing daily numbers of supplement servings, the gold-standard formulation treats each serving as an indivisible unit. The best practice is to define the serving variables as nonnegative integers when the intended interpretation is whole servings. A common mistake is to model the variables as continuous, which happens because the phrase \"how much\" can be misread as allowing fractional servings. More generally, this reflects that count-based decisions should use integer variables whenever the physical or operational unit is indivisible.",
+    "example": "# Wrong\nx_A, x_B \\in \\mathbb{R}_{\\ge 0}\n\n# This allows a fractional solution such as x_A = 0, x_B = 6.6667.\n\n# Correct\nx_A, x_B \\in \\mathbb{Z}_{\\ge 0}\n\n# Gurobi version:\nx = model.addVars([\"A\", \"B\"], lb=0, vtype=GRB.INTEGER, name=\"servings\")",
+    "iteration": 0,
+    "task_id": "F088",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      3,
+      2
+    ],
+    "correctness": [
+      3,
+      0
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [
+        "A180"
+      ],
+      "unretrieved": [
+        "A014"
+      ],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 21,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision quantities represent indivisible counts rather than divisible flows or rates. For example, when the problem statement mentioned how many batches of hams and pork ribs should be made, the word batches indicated count-type production quantities.",
+    "explanation": "When the problem involves annual production measured as counts of batches, fractional batches can change both the feasible region and the reported optimum. The best practice is to model the batch variables as nonnegative integer variables when batches are indivisible. A common mistake is to declare the variables as continuous and then accept a fractional production plan, which happens because the phrase \"not explicitly required\" is interpreted as permission to relax count variables. More generally, this reflects that variable domains should follow the physical meaning of the decision quantity, not only the algebraic form of the constraints.",
+    "example": "# Wrong\n# Allows fractional batches such as x_R = 8000/7\nx_H >= 0, x_R >= 0\nmaximize 150*x_H + 300*x_R\n\n# or in Gurobi:\nbatches = model.addVars(products, lb=0, vtype=GRB.CONTINUOUS, name=\"batches\")\n\n# Correct\n# Batches are indivisible count variables\nx_H, x_R in nonnegative integers\nmaximize 150*x_H + 300*x_R\n\n# or in Gurobi:\nbatches = model.addVars(products, lb=0, vtype=GRB.INTEGER, name=\"batches\")",
+    "iteration": 0,
+    "task_id": "F083",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      0,
+      1
+    ],
+    "correctness": [
+      0,
+      0
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [
+        "A172"
+      ],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 22,
+    "taxonomy": {
+      "General Formulation": {
+        "Constraint Formulation": [
+          "Incorrect Relational Operators"
+        ]
+      }
+    },
+    "condition": "This insight applies when a qualitative comparison or preference between decision quantities must be translated into an algebraic inequality. For example, when the problem statement mentioned that the company prefers to have more camel caravans than desert trucks.",
+    "explanation": "When the problem involves a preference comparing the number of camel-caravan trips and desert-truck trips, the correct model represented this preference as allowing the number of camel trips to be at least the number of truck trips. The best practice is to match the intended operational meaning of the comparison constraint exactly as encoded in the validated formulation. A common mistake is to impose a stricter inequality, such as requiring at least one additional camel trip, which happens because the phrase 'more than' is interpreted literally even when the intended model only requires no fewer camel trips than truck trips. More generally, this reflects that relational operators in preference or policy constraints can change the feasible region and exclude the true optimum.",
+    "example": "# Wrong\n# Forces strictly more camel trips than truck trips and excludes equality.\nx_C >= x_T + 1\n\n# Correct\n# Allows at least as many camel trips as truck trips, matching the validated formulation.\nx_C >= x_T",
+    "iteration": 0,
+    "task_id": "F140",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [],
+    "correctness": [],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 23,
+    "taxonomy": {
+      "Domain Modeling": {
+        "Production Planning": [
+          "Inventory Balance Equations"
+        ]
+      }
+    },
+    "condition": "This insight applies when production can be shifted across time and unmet demand is penalized by period while early production can carry forward as stock. For example, when the problem statement mentioned weekly demand, delayed-delivery compensation, and production decisions over an 8-week transition period.",
+    "explanation": "When the problem involves weekly production, demand, and delay penalties, the inventory/backlog state must distinguish positive carryover inventory from negative net inventory. The best practice is to use a signed inventory balance and charge delay only on the negative part of inventory. A common mistake is to model only a nonnegative backlog variable with an equality balance, which happens because backlog and inventory are treated as the same state variable. More generally, this reflects that production-planning models with time carryover should preserve the net stock-flow balance and then derive backlog or shortage costs from that state.",
+    "example": "# Wrong\n# B[t] is forced to be nonnegative, so production above cumulative demand is impossible.\nB[p,t] = B[p,t-1] + demand[p,t] - production[p,t]\nB[p,t] >= 0\nB[p,8] = 0\n\n# Correct\n# Inv may be positive inventory or negative net backlog; backlog cost is charged only on shortage.\nInv[p,t] = Inv[p,t-1] + production[p,t] - demand[p,t]\nBacklog[p,t] >= -Inv[p,t]\nBacklog[p,t] >= 0\nBacklog[p,8] = 0",
+    "iteration": 0,
+    "task_id": "B000",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      4
+    ],
+    "correctness": [
+      2
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 24,
+    "taxonomy": {
+      "Domain Modeling": {
+        "Resource Allocation": [
+          "Capacity/Resource Balance Equations"
+        ]
+      }
+    },
+    "condition": "This insight applies when a fixed resource pool changes availability over time because some resources are temporarily assigned to another activity and later return or create new capacity. For example, when the problem statement mentioned 50 skilled workers, two-week trainer assignments, two-week trainee periods, and newly trained workers becoming productive after training.",
+    "explanation": "When the problem involves worker pools evolving by week, worker counts should be accounted for through time-state balance equations or full allocation equations. The best practice is to make each worker category either explicitly allocated to a role or represented by an explicit idle/available state. A common mistake is to use only upper-bound availability inequalities, which happens because the modeler focuses on not exceeding the worker pool but does not fully track where the workers are in each week. More generally, this reflects that resource-allocation models with temporal transformations need conservation-style accounting for the resource pool, not only capacity ceilings.",
+    "example": "# Wrong\n# Workers can disappear from the accounting because these are only upper bounds.\ns[t] + o[t] + b[t-1] + b[t] <= 50\nu[t] <= sum(a[k] for k in range(1, t-1))\n\n# Correct\n# All original skilled workers are accounted for, and newly trained availability is tracked explicitly.\nsw_normal[t] + sw_overtime[t] + sw_train[t] == 50\nsw_train[t] == sw_train_start[t] + sw_train_start[t-1]\n\nnw_prod[t] == nw_prod[t-1] + nw_start_training[t-2]  # for t after the two-week training lag\n\n# If idleness is allowed, represent it explicitly instead of letting workers vanish:\nsw_normal[t] + sw_overtime[t] + sw_train[t] + sw_idle[t] == 50",
+    "iteration": 0,
+    "task_id": "B000",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [],
+    "correctness": [],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 25,
+    "taxonomy": {
+      "General Formulation": {
+        "Constraint Formulation": [
+          "Big-M & Indicator Variables"
+        ]
+      }
+    },
+    "condition": "This insight applies when a logical either-or choice controls whether associated activity variables may be positive. For example, when the problem statement mentioned that the farmer wants to choose only one of the bicycle and the handcart.",
+    "explanation": "When the problem involves choosing one physically demanding transportation mode and then allowing trips only for the chosen mode. The best practice is to introduce binary selection variables and link trip-count variables to those binaries with Big-M constraints, together with an exact-selection constraint. A common mistake is to write a product constraint such as x_B x_K = 0, which happens because the modeler tries to encode mutual exclusivity directly through the activity variables. More generally, this reflects that logical on/off decisions in MILP models should be represented explicitly with binary variables and linear linking constraints rather than nonlinear products of decision variables.",
+    "example": "# Wrong\nx_B * x_K = 0\nx_B, x_K integer and nonnegative\n\n# Correct\ny_B, y_K binary\nx_B, x_K integer and nonnegative\ny_B + y_K = 1\nx_B <= M * y_B\nx_K <= M * y_K",
+    "iteration": 0,
+    "task_id": "B062",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      27,
+      2
+    ],
+    "correctness": [
+      26,
+      1
+    ],
+    "distribution": {
+      "positive": [
+        "B062"
+      ],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 26,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision quantities represent counts of indivisible physical items rather than divisible flows. For example, when the problem statement mentioned arranging production quantities in pieces of products I, II, and III, the quantities corresponded to product counts.",
+    "explanation": "When the problem involves deciding how many pieces of each product to produce and process on machines. The best practice is to model those production quantities as integer variables when the intended production unit is indivisible, as done in the gold-standard program with GRB.INTEGER variables for product totals and machine allocations. A common mistake is to model the production quantities as continuous variables, which happens because capacity-planning problems are sometimes treated as divisible-flow linear programs even when the physical decision is a count of pieces. More generally, this reflects that the variable type must match the granularity of the real-world decision, because the LP relaxation can return fractional production quantities and a profit value that is not attainable by an integer production plan.",
+    "example": "# Wrong\n# Production quantities are allowed to be fractional\nx[p,a,b] >= 0\n# or in Gurobi:\nx = model.addVars(routes, lb=0.0, vtype=GRB.CONTINUOUS)\n\n# Correct\n# Production quantities are integer counts of pieces\nx[p,a,b] \u2208 Z_+\n# or in Gurobi:\nx = model.addVars(routes, lb=0.0, vtype=GRB.INTEGER)",
+    "iteration": 0,
+    "task_id": "B030",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      2,
+      2
+    ],
+    "correctness": [
+      1,
+      1
+    ],
+    "distribution": {
+      "positive": [
+        "F102"
+      ],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 27,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Total-vs-Attribute Variable Semantics"
+        ]
+      }
+    },
+    "condition": "This insight applies when some produced units have a special attribute such as being processed during overtime. For example, when the problem statement mentioned that products produced during overtime in Process II have reduced profit, and the gold-standard formulation used overtime variables linked to total production variables.",
+    "explanation": "When the problem involves total production and a subset of that production incurring overtime profit reductions. The best practice is to define total production variables and separate overtime-subset variables that are bounded by the corresponding total production quantities. A common mistake is to define regular-production and overtime-production variables as independent production streams, which happens because the overtime attribute is mistaken for a separate product category. More generally, this reflects that auxiliary variables should preserve the intended physical meaning of the base decision variables.",
+    "example": "# Wrong\nx_A = units of A using regular Process II time\ny_A = units of A using overtime Process II time\ntotal A production = x_A + y_A\n\n# Correct\nx_A = total units of A produced\nx_A_OT = units of A produced during overtime\nx_A_OT <= x_A",
+    "iteration": 0,
+    "task_id": "B047",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [],
+    "correctness": [],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 30,
+    "taxonomy": {
+      "General Formulation": {
+        "Constraint Formulation": [
+          "Big-M & Indicator Variables"
+        ]
+      }
+    },
+    "condition": "This insight applies when binary variables activate or deactivate integer activity variables and the Big-M value is not directly given by the data. For example, when the problem statement mentioned that electric vehicles generate zero pollution, so the pollution limit does not naturally bound the number of electric-vehicle trips.",
+    "explanation": "When the problem involves a selected mode whose trip variable is controlled by a binary variable, any Big-M linking constant must be finite, numerical, and valid for the modeled planning scope. The best practice is to derive a safe bound from physical requirements or otherwise use an activation formulation that does not depend on an unspecified M. A common mistake is to introduce a symbolic U_e without a concrete value, which happens because other modes are bounded by pollution while the zero-pollution electric mode is not. More generally, this reflects that Big-M logic is only solver-ready when every M is explicitly defined and large enough not to cut off valid relevant solutions.",
+    "example": "# Wrong\nx_e <= U_e * y_e     # U_e is declared abstractly but not numerically derived from the data\n\n# Correct\nx_e <= 30 * y_e      # one safe data-derived bound is ceil(1800 / 60) = 30 electric trips",
+    "iteration": 0,
+    "task_id": "B023",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      1,
+      2
+    ],
+    "correctness": [
+      1,
+      1
+    ],
+    "distribution": {
+      "positive": [
+        "B062"
+      ],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 31,
+    "taxonomy": {
+      "General Formulation": {
+        "Constraint Formulation": [
+          "Incorrect Relational Operators"
+        ]
+      }
+    },
+    "condition": "This insight applies when a problem statement describes a one-sided requirement rather than an exact identity. For example, when the problem statement mentioned producing a batch consisting of 90 pieces of 3 meters and 60 pieces of 4 meters from 10-meter raw bars, or when it mentioned choosing only one of the van and electric vehicle options because both consume a lot of energy.",
+    "explanation": "When the problem involves, requirements such as minimum demand satisfaction or mutual exclusivity between choices. The best practice is to match the relational operator to the logical meaning of the statement: use coverage constraints for at-least requirements and cardinality upper bounds for at-most-one restrictions. A common mistake is to impose equality constraints, which happens because phrases such as 'produce a batch' or 'only one' are interpreted as exact fulfillment or mandatory selection. More generally, this reflects that equality constraints impose both lower and upper requirements, while many operational statements impose only one side of that relationship.",
+    "example": "# Wrong: treats minimum cutting demands as exact balances\n3*x1 + 2*x2 + x3 + 2*x5 + x6 == 90\nx2 + x3 + 2*x4 + x7 == 60\n\n# Correct: allows surplus production when not forbidden\n3*x_A + 2*x_B + 0*x_C >= 90\n0*x_A + 1*x_B + 2*x_C >= 60\n\n# Wrong: forces exactly one option to be selected\ny_v + y_e = 1\n\n# Correct: enforces mutual exclusion only\ny_v + y_e <= 1",
+    "iteration": 0,
+    "task_id": [
+      "B023",
+      "B068"
+    ],
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      66,
+      31
+    ],
+    "correctness": [
+      50,
+      15
+    ],
+    "distribution": {
+      "positive": [
+        "A180",
+        "A093",
+        "A014",
+        "A003",
+        "A236",
+        "A172",
+        "F134",
+        "F080",
+        "F167",
+        "F126",
+        "F019",
+        "F021",
+        "F062",
+        "F091",
+        "B016"
+      ],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [
+        "F203"
+      ],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 32,
+    "taxonomy": {
+      "General Formulation": {
+        "Objective Specification": [
+          "Missing or Mis-specified Objective"
+        ]
+      }
+    },
+    "condition": "This insight applies when a problem statement provides an efficiency or performance criterion that must rank feasible solutions. For example, when the problem statement mentioned using 10-meter raw steel bars most efficiently, or when it mentioned pollution generated by each trip and a pollution limit for transporting at least 1800 units.",
+    "explanation": "When the problem involves, multiple feasible plans that differ in an operational performance measure. The best practice is to encode the intended performance measure directly in the objective function. A common mistake is to optimize a related proxy such as total waste, or to use a dummy feasibility objective such as min Z = 0, which happens because related quantities or constraint data are mistaken for the true optimization criterion. More generally, this reflects that feasibility and optimality are different modeling tasks, and related objectives are interchangeable only under special conditions.",
+    "example": "# Wrong: optimizes a related but non-equivalent proxy\nminimize: sum(waste[p] * x[p] for p in patterns)\n\n# Correct: optimizes the intended raw-bar usage metric\nminimize: sum(x[p] for p in patterns)\n\n# Wrong: feasibility objective does not rank feasible plans\nmin Z = 0\n\n# Correct: optimizes total pollution\nminimize 100*T + 50*V*y_V + 10*M\n# or, if V is already forced to 0 when y_V = 0:\nminimize 100*x_t + 50*x_v + 10*x_m",
+    "iteration": 0,
+    "task_id": [
+      "B023",
+      "B068"
+    ],
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      19,
+      11
+    ],
+    "correctness": [
+      15,
+      5
+    ],
+    "distribution": {
+      "positive": [
+        "A033",
+        "A180",
+        "F203",
+        "F134",
+        "F152"
+      ],
+      "negative": [],
+      "unretrieved": [
+        "B016"
+      ],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 33,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when a decision variable represents an indivisible count while other activity variables may remain divisible. For example, when the problem statement mentioned maximizing the number of completed products, each completed product is a count, even though workshop hours allocated to components are divisible.",
+    "explanation": "When the problem involves allocating divisible production hours to maximize a count of finished units, the hours variables can be continuous but the completed-product variable may need to be integer. The best practice is to distinguish divisible activity levels, such as hours x[i,j], from indivisible outcome counts, such as the number of completed products z. A common mistake is to declare all variables continuous, including z, which happens because the model is described as a linear production-allocation formulation and the divisibility of hours is incorrectly transferred to the product count. More generally, this reflects that variable domains should follow the physical meaning of each decision quantity, not merely the algebraic linearity of the constraints.",
+    "example": "# Wrong\n# z is allowed to be fractional, so the model may return an LP-relaxation value such as 2924.14 completed products.\nz = model.addVar(lb=0, vtype=GRB.CONTINUOUS, name=\"z\")\n\n# Correct\n# z represents a count of completed products, so it is integer.\nz = model.addVar(lb=0, vtype=GRB.INTEGER, name=\"z\")",
+    "iteration": 0,
+    "task_id": "B031",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      3
+    ],
+    "correctness": [
+      3
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 34,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision quantities represent indivisible counts rather than divisible flows or amounts. For example, when the problem statement mentioned producing a single unit of product A or product B and asked for a production plan in units, the production quantities are naturally interpreted as integer counts of products.",
+    "explanation": "When the problem involves deciding how many units of products to produce, as in this steel-aluminum-labor production planning problem, the best practice is to declare the production quantity variables as integer variables if fractional products are not meaningful. A common mistake is to model product quantities as continuous variables, which happens because the word 'integer' may not be explicitly stated even though the physical decision is a count of units. More generally, this reflects that variable domains should follow the semantics of the decision quantity, not only the explicit wording of the problem statement.",
+    "example": "# Wrong\nx_A >= 0, x_B >= 0 are continuous variables\n\n# In Gurobi:\nx = model.addVars(['A', 'B'], lb=0, vtype=GRB.CONTINUOUS, name='Produce')\n\n# Correct\nx_A, x_B are nonnegative integer variables\n\n# In Gurobi:\nx = model.addVars(['A', 'B'], lb=0, vtype=GRB.INTEGER, name='Produce')",
+    "iteration": 0,
+    "task_id": "B097",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      1
+    ],
+    "correctness": [
+      1
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 35,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision quantities represent indivisible counted units rather than divisible quantities. For example, when the problem statement mentioned units of liquid fertilizer and solid fertilizer produced and units held in ending inventory.",
+    "explanation": "When the problem involves production quantities and ending inventories measured as counted units. The best practice is to model those quantities as nonnegative integer variables when fractional units are not allowed by the intended formulation. A common mistake is to declare production and inventory variables as continuous, which happens because resource-consumption models often look like linear programs with divisible flows. More generally, this reflects that variable domains must match the physical interpretation of the decision quantities, not just the linearity of the constraints.",
+    "example": "# Wrong\nx_p >= 0 continuous\nI_p >= 0 continuous\n\n# This can allow fractional production or inventory, e.g., x_S = 6.25 and I_S = 1.25.\n\n# Correct\nx_p \u2208 Z_+  for each product p\nI_p \u2208 Z_+  for each product p\n\n# Gurobi-style\nProduce = model.addVars(products, vtype=GRB.INTEGER, lb=0, name=\"Produce\")\nInvEnd = model.addVars(products, vtype=GRB.INTEGER, lb=0, name=\"InvEnd\")",
+    "iteration": 0,
+    "task_id": "B087",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [],
+    "correctness": [],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 36,
+    "taxonomy": {
+      "General Formulation": {
+        "Constraint Formulation": [
+          "Hard vs. Soft Requirement Encoding"
+        ]
+      }
+    },
+    "condition": "This insight applies when a problem contains stated requirements that are mandatory feasibility limits, quotas, or equalities alongside other economic criteria or planning targets. For example, when the problem statement mentioned inspection and sales costs should not exceed 5500 yuan, at least 80 microwave ovens should be sold, at least 50 water heaters should be sold, contract requirements of at least 10 units of model A and at least 15 units of model B, or exact utilization of 150 hours for Process I.",
+    "explanation": "When the problem involves mandatory minimum sales, contract quantities, maximum budgets, or exact resource-use requirements, these conditions define the feasible region. The best practice is to encode them directly as hard constraints, such as lower bounds, upper bounds, or equality constraints. A common mistake is to replace these requirements with deviation variables and penalize violations in the objective, which happens because the modeler treats every planning statement as a goal-programming target rather than distinguishing mandatory constraints from soft preferences or economic objectives. More generally, this reflects that feasibility requirements should not be relaxed by penalties unless the problem explicitly allows violation.",
+    "example": "# Wrong: treating mandatory requirements as soft goals\nx_M + d_M_minus - d_M_plus == 80\nx_H + d_H_minus - d_H_plus == 50\n30*x_M + 50*x_H + d_C_minus - d_C_plus == 5500\nmodel.setObjective(pi_M*d_M_minus + pi_H*d_H_minus + pi_C*d_C_plus, GRB.MINIMIZE)\n\n# Correct: encoding mandatory requirements as hard constraints\nmodel.addConstr(x_M >= 80)\nmodel.addConstr(x_H >= 50)\nmodel.addConstr(30*x_M + 50*x_H <= 5500)\n\n# Another representative case\n# Correct hard constraints for contract and resource requirements\nmodel.addConstr(x_A >= 10)\nmodel.addConstr(x_B >= 15)\nmodel.addConstr(process_I_hours == 150)",
+    "iteration": 0,
+    "task_id": [
+      "B047",
+      "B064"
+    ],
+    "merge_version": 1,
+    "refine_version": 0,
+    "occurrence": [
+      22,
+      6
+    ],
+    "correctness": [
+      10,
+      3
+    ],
+    "distribution": {
+      "positive": [
+        "A003",
+        "F152",
+        "F163"
+      ],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 37,
+    "taxonomy": {
+      "Domain Modeling": {
+        "Resource Allocation": [
+          "Aggregate Capacity Coverage"
+        ]
+      }
+    },
+    "condition": "This insight applies when multiple products, activities, or resource types consume or provide a shared aggregate resource, and the problem specifies a total service requirement, regular capacity, required utilization, or capacity extension such as overtime. For example, when the problem statement mentioned that carts transport 5 kg/min, trolleys transport 7 kg/min, and the organizer has to deliver 100 kg/min; or when microwave ovens and water heaters both use workshops A and B, both workshops' production hours should be fully utilized, and workshop A has limited overtime.",
+    "explanation": "When the problem involves aggregate capacity or service coverage, the total contribution or workload from all relevant products, activities, or resource types should be summed and compared with the shared requirement or available capacity using the correct balance direction. The best practice is to write one aggregate constraint per shared resource, such as a service coverage inequality, a capacity upper bound with overtime, or an equality balance with the appropriate idle-time or overtime variable depending on whether the system is underloaded or overloaded. A common mistake is to omit some contributors or to put the slack variable on the wrong side, such as modeling required extra workshop hours as idle time, which happens because the modeler treats a shared aggregate requirement as separate product-level constraints or interprets full utilization as only a regular-capacity upper bound. More generally, this reflects that shared-capacity equations must aggregate all relevant activity coefficients and represent the correct side of the balance: unused capacity for underload, overtime or extra capacity for overload, and neither if exact utilization is mandatory.",
+    "example": "# Service coverage example\n# Wrong: each resource is checked separately and the aggregate delivery rate is not modeled.\nmodel.addConstr(5*carts >= 100)\nmodel.addConstr(7*trolleys >= 100)\n\n# Correct: total delivery rate from all resource types covers the requirement.\nmodel.addConstr(5*carts + 7*trolleys >= 100)\n\n# Workshop utilization with overtime example\n# Wrong: this treats excess workload as impossible and records only idle time.\nd_B_idle = model.addVar(lb=0)\nmodel.addConstr(x_M + 3*x_H + d_B_idle == 150)\n\n# Correct: total workload from all products equals regular hours plus overtime.\no_B = model.addVar(lb=0)\nmodel.addConstr(x_M + 3*x_H == 150 + o_B)\n\no_A = model.addVar(lb=0, ub=20)\nmodel.addConstr(2*x_M + x_H == 250 + o_A)\n\n# Capacity with limited overtime example\n# Correct: aggregate Process II workload uses regular capacity plus bounded overtime.\no_II = model.addVar(lb=0, ub=30)\nmodel.addConstr(a_II*x_A + b_II*x_B <= 70 + o_II)",
+    "iteration": 0,
+    "task_id": [
+      "B047",
+      "B064",
+      "A198"
+    ],
+    "merge_version": 2,
+    "refine_version": 0,
+    "occurrence": [
+      43,
+      46
+    ],
+    "correctness": [
+      29,
+      23
+    ],
+    "distribution": {
+      "positive": [
+        "A033",
+        "A180",
+        "A014",
+        "A003",
+        "A236",
+        "A172",
+        "F057",
+        "F134",
+        "F080",
+        "F167",
+        "F102",
+        "F122",
+        "F126",
+        "F152",
+        "F019",
+        "F021",
+        "F135",
+        "F062",
+        "F163",
+        "F091",
+        "F131",
+        "B016",
+        "B062"
+      ],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 38,
+    "taxonomy": {
+      "General Formulation": {
+        "Objective Specification": [
+          "Missing or Mis-specified Objective"
+        ]
+      }
+    },
+    "condition": "This insight applies when the problem provides actual economic cost coefficients and asks for a production plan based on those operating conditions. For example, when the problem statement mentioned hourly workshop costs of 80 yuan and 20 yuan and inspection and sales costs of 30 yuan and 50 yuan per unit.",
+    "explanation": "When the problem involves explicit production and inspection cost data, the objective should reflect the actual total cost implied by the selected production plan and resource use. The best practice is to minimize the relevant operating cost expression, including workshop-hour costs and inspection or sales costs. A common mistake is to minimize arbitrary weighted deviations, which happens because the modeler introduces goal-programming penalties even though the problem data provide direct cost coefficients. More generally, this reflects that the optimization objective should be derived from the stated economic criterion, not from auxiliary deviation variables unless the problem explicitly defines a penalty-based goal objective.",
+    "example": "# Wrong\nmodel.setObjective(\n    pi_C*d_C_plus + pi_M*d_M_minus + pi_H*d_H_minus + 80*d_A_idle + 80*o_A + 20*d_B_idle,\n    GRB.MINIMIZE\n)\n\n# Correct\ntotal_cost = (\n    80 * (250 + o_A) +\n    20 * (150 + o_B) +\n    30 * x_M +\n    50 * x_H\n)\nmodel.setObjective(total_cost, GRB.MINIMIZE)",
+    "iteration": 0,
+    "task_id": "B064",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      29,
+      5
+    ],
+    "correctness": [
+      22,
+      2
+    ],
+    "distribution": {
+      "positive": [
+        "A014",
+        "F062"
+      ],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [
+        "A172"
+      ],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 39,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision quantities represent counts of indivisible units rather than divisible flows. For example, when the problem statement mentioned food nutrients and costs per serving for weekly food choices, the decision quantity corresponds to the number of servings of each food item.",
+    "explanation": "When the problem involves choosing numbers of food servings, fractional servings such as 9.45 servings of eggs change the feasible region and can produce a lower LP-relaxation cost than the intended integer model. The best practice is to declare the serving-count variables as nonnegative integer variables. A common mistake is to declare them as continuous nonnegative quantities, which happens because the word 'amount' is interpreted as fully divisible even though the data and intended formulation are per serving. More generally, this reflects that variable domains must match whether the modeled units are divisible quantities or discrete counts.",
+    "example": "# Wrong\n# Allows fractional servings and gives an LP relaxation solution such as x['Eggs'] = 9.45\nx = model.addVars(foods, lb=0, vtype=GRB.CONTINUOUS, name='x')\n\n# Correct\n# Enforces whole serving counts, matching the intended formulation\nx = model.addVars(foods, lb=0, vtype=GRB.INTEGER, name='x')",
+    "iteration": 0,
+    "task_id": "E023",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      4
+    ],
+    "correctness": [
+      4
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 40,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision quantities represent countable units rather than freely divisible amounts. For example, when the problem statement mentioned nutrition and cost values per serving for each food item and asked for a combination of foods to meet dietary requirements.",
+    "explanation": "When the problem involves countable servings of foods with nutrition and cost specified per serving, as in this diet problem, the serving variables represent numbers of servings. The best practice is to declare the food quantity variables as nonnegative integer variables when servings are treated as indivisible units. A common mistake is to model the variables as nonnegative continuous variables and accept a fractional solution such as x_Rice = 2217/250 = 8.868, which happens because the modeler interprets \u201camount to consume\u201d as a divisible continuous quantity and solves only the LP relaxation. More generally, this reflects that variable domains must match the physical granularity of the decisions, since a continuous relaxation can produce a lower objective value that is infeasible for the intended integer model.",
+    "example": "# Wrong\nx_i \\in \\mathbb{R}_{\\ge 0} for each food i\n\n# This permits fractional servings such as:\nx_Rice = 8.868\n\n# Correct\nx_i \\in \\mathbb{Z}_{\\ge 0} for each food i\n\n# Gurobi version:\nx = model.addVars(foods, lb=0, vtype=GRB.INTEGER, name=\"x\")",
+    "iteration": 0,
+    "task_id": "E029",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      1
+    ],
+    "correctness": [
+      1
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 41,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision quantities represent counts of indivisible items rather than continuously divisible amounts. For example, when the problem statement mentioned choosing a combination of food items and the gold-standard model interpreted the number of selected servings/items as integer quantities.",
+    "explanation": "When the problem involves selecting counts of food items or servings, the best practice is to model those quantities as nonnegative integers if fractional servings/items are not part of the intended scenario. A common mistake is to declare the serving variables as continuous, which happens because the algebraic diet model resembles a linear programming relaxation and the word 'amount' can be misread as divisible quantity. More generally, this reflects that variable domains must match the physical discreteness of the decisions, because relaxing integer counts to continuous values can produce a cheaper but infeasible-for-the-original-problem solution.",
+    "example": "# Wrong\n# Allows fractional servings such as 3.975 eggs or 9.769 berries\nx = model.addVars(foods, lb=0, vtype=GRB.CONTINUOUS, name=\"servings\")\n\n# This solves the LP relaxation and can return objective about 39.80,\n# which is not the correct integer optimum.\n\n# Correct\n# Servings/items are selected in integer counts\nx = model.addVars(foods, lb=0, vtype=GRB.INTEGER, name=\"servings\")\n\n# With integer servings, a feasible optimal solution has cost 40,\n# for example: Eggs = 4, Berries = 10, Nuts = 1.",
+    "iteration": 0,
+    "task_id": "E013",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [],
+    "correctness": [],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 42,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision quantities represent counts of indivisible units rather than continuously divisible amounts. For example, when the problem statement mentioned determining a combination of food items measured in servings purchased or consumed during the week.",
+    "explanation": "When the problem involves choosing numbers of servings of food items, the serving variables in the gold-standard formulation are integer-valued. The best practice is to match the variable domain to the physical meaning of the decision: indivisible serving counts should be modeled as nonnegative integers. A common mistake is to relax such variables to continuous values, which happens because nutritional quantities such as grams and calories are continuous even though the purchased serving counts may not be. More generally, this reflects that feasibility and optimality depend not only on the objective and constraints, but also on whether the decision variables correctly represent discrete or divisible choices.",
+    "example": "# Wrong\n# Allows fractional servings, producing the LP-relaxation solution x[Food_3] = 1796/114 and cost about 31.51\nx = model.addVars(foods, vtype=GRB.CONTINUOUS, lb=0, name=\"servings\")\n\n# Correct\n# Requires whole servings, matching the gold-standard model; 16 servings of Food_3 gives cost 32\nx = model.addVars(foods, vtype=GRB.INTEGER, lb=0, name=\"servings\")",
+    "iteration": 0,
+    "task_id": "E002",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      0,
+      2
+    ],
+    "correctness": [
+      0,
+      1
+    ],
+    "distribution": {
+      "positive": [
+        "B016"
+      ],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 43,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when the quantities to be chosen are counts of whole food items or servings rather than freely divisible nutrient mixtures. For example, when the problem statement mentioned eight food items, each with fixed protein, carbohydrate, calorie, and cost values, and asks for the minimum-cost meal plan meeting daily nutritional requirements.",
+    "explanation": "When the problem involves choosing how many servings of each food to consume, the serving variables are counts in the correct formulation. The best practice is to declare those variables as nonnegative integers when servings are modeled as indivisible units. A common mistake is to relax the serving variables to continuous values and then report a fractional LP solution as optimal, which happens because per-serving nutritional data can make the model look like a divisible blending problem. More generally, this reflects that variable domains must match the physical or contractual meaning of the decision quantities, not just the algebraic form of the constraints.",
+    "example": "# Wrong\n# Allows fractional servings, producing an LP relaxation value such as 23.3249\nx = model.addVars(foods, lb=0, vtype=GRB.CONTINUOUS, name=\"x\")\n\n# Correct\n# Servings are modeled as indivisible counts, matching the gold-standard MILP\nx = model.addVars(foods, lb=0, vtype=GRB.INTEGER, name=\"x\")",
+    "iteration": 0,
+    "task_id": "E020",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      4,
+      2
+    ],
+    "correctness": [
+      4,
+      1
+    ],
+    "distribution": {
+      "positive": [
+        "F203"
+      ],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 44,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when the decision quantities correspond to counts of food servings or items with fixed nutrient contributions and fixed costs per unit. For example, when the problem statement mentioned choosing among Chicken, Cheese, Rice, and Beans, each providing specified amounts of protein, carbohydrates, calories, and cost, to form a combination that meets minimum daily nutrient requirements.",
+    "explanation": "When the problem involves selecting numbers of food servings to meet nutrient requirements at minimum cost. The best practice is to match the variable domain to the physical meaning of the decision, so serving counts are modeled as nonnegative integers when fractional servings are not allowed. A common mistake is to relax those variables to nonnegative continuous variables, which happens because the nutrient and cost constraints are linear and resemble a standard continuous diet LP. More generally, this reflects that a mathematically valid LP relaxation can produce a lower-cost fractional solution that is not feasible for the intended integer decision problem.",
+    "example": "# Wrong\nx_i \u2208 R_+ for each food i\nmin 5 x_Chicken + 9 x_Cheese + 2 x_Rice + x_Beans\n\nThis allows the fractional solution x_Rice = 2271 / 207 \u2248 10.971 with objective \u2248 21.94.\n\n# Correct\nx_i \u2208 Z_+ for each food i\nmin 5 x_Chicken + 9 x_Cheese + 2 x_Rice + x_Beans\n\nIn Gurobi:\nx = model.addVars(foods, lb=0, vtype=GRB.INTEGER, name=\"servings\")\n\nThis enforces whole servings; for example, x_Rice = 11 is feasible with objective 22.",
+    "iteration": 0,
+    "task_id": "E018",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      0,
+      1
+    ],
+    "correctness": [
+      0,
+      0
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [
+        "A180"
+      ],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 45,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when the optimization problem involves selecting quantities of food items or servings where each option has fixed nutrient values and a fixed cost per item or serving. For example, when the problem statement mentioned Chicken, Rice, Eggs, Broccoli, Lentils, and Apples, each with specified protein, carbohydrate, calorie amounts, and prices, and asked for the least expensive combination to meet daily dietary requirements.",
+    "explanation": "When the problem involves choosing numbers of servings of food items. The best practice is to model each serving-count decision variable as a nonnegative integer variable when servings are treated as indivisible. A common mistake is to declare the serving variables as continuous, which happens because the modeler interprets the absence of an explicit phrase such as \u201cwhole servings\u201d as permission to buy fractional servings. More generally, this reflects that variable domains must match the physical or operational meaning of the decision quantity, since a continuous relaxation can produce a cheaper fractional solution that is not feasible for the intended integer problem.",
+    "example": "# Wrong\n# Treats servings as divisible and solves the LP relaxation\nx_i >= 0 continuous for each food i\n\n# In Gurobi:\nx = model.addVars(foods, lb=0, vtype=GRB.CONTINUOUS, name=\"x\")\n\n# This can return a fractional plan such as:\n# x[\"Chicken\"] = 20621/2994, x[\"Lentils\"] = 26869/2994\n# with objective about 15.86, which is not an integer-serving meal plan.\n\n# Correct\n# Treats servings as integer counts\nx_i in Z_+ for each food i\n\n# In Gurobi:\nx = model.addVars(foods, lb=0, vtype=GRB.INTEGER, name=\"x\")\n\n# One optimal integer solution is:\n# x[\"Chicken\"] = 7, x[\"Lentils\"] = 9, all other foods = 0\n# total cost = 16",
+    "iteration": 0,
+    "task_id": "E021",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      7
+    ],
+    "correctness": [
+      4
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 46,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when the decision quantities correspond to counts of food items or servings with fixed per-item costs and nutrient contributions, rather than continuously divisible amounts. For example, when the problem statement mentioned choosing among Eggs, Rice, Chicken, and Broccoli, each with a specific cost and fixed grams of protein, carbohydrates, and calories, to meet daily nutrition targets.",
+    "explanation": "When the problem involves choosing numbers of servings of foods to satisfy nutrient requirements. The best practice is to match the variable domain to the physical meaning of the decision, so serving quantities are modeled as nonnegative integers when only whole servings are allowed. A common mistake is to model the serving variables as continuous nonnegative quantities, which happens because diet problems are often introduced as continuous linear programs. More generally, this reflects that the algebraic structure of the constraints may be correct while the variable domain can still change the feasible region and the optimal objective value.",
+    "example": "# Wrong\nx_E, x_R, x_C, x_B >= 0 continuous\n\nmin 6 x_E + 10 x_R + x_C + 7 x_B\ns.t. nutrient requirements\n\nThis allows the fractional solution:\nx_C = 1553 / 146, cost = 1553 / 146 \u2248 10.637\n\n# Correct\nx_E, x_R, x_C, x_B \u2208 Z_+\n\nIn Gurobi:\nx = model.addVars(foods, lb=0, vtype=GRB.INTEGER, name=\"Servings\")\n\nThen the all-chicken integer solution uses:\nx_Chicken = 11, cost = 11",
+    "iteration": 0,
+    "task_id": "E017",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      3
+    ],
+    "correctness": [
+      2
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 47,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when the decision quantities represent how many servings or units of listed food items are consumed, with each serving or unit having fixed cost and nutritional values. For example, when the problem statement mentioned selecting amounts of Beef, Pasta, Broccoli, Chicken, Apple, Pork, Lentils, Eggs, and Cheese, each with a stated cost, protein, carbohydrate, and calorie content, to meet daily minimum nutrition requirements at minimum expense.",
+    "explanation": "When the problem involves deciding how many servings of Beef, Pasta, Broccoli, Chicken, Apple, Pork, Lentils, Eggs, and Cheese to consume. The best practice is to match the variable domain to the physical meaning of the decision, using nonnegative integer variables when servings are treated as countable units. A common mistake is to model serving counts as continuous variables, which happens because the modeler interprets the absence of an explicit whole-serving statement as permission to allow fractional servings. More generally, this reflects that variable type is a modeling assumption tied to divisibility of the underlying decision unit, and changing it can produce a different optimization problem and a different objective value.",
+    "example": "# Wrong\nx_i \\in \\mathbb{R}_{\\ge 0} \\quad \\forall i \\in I\n\n# Gurobi version\nx = model.addVars(foods, lb=0, vtype=GRB.CONTINUOUS, name=\"servings\")\n\n# Correct\nx_i \\in \\mathbb{Z}_{\\ge 0} \\quad \\forall i \\in I\n\n# Gurobi version\nx = model.addVars(foods, lb=0, vtype=GRB.INTEGER, name=\"servings\")",
+    "iteration": 0,
+    "task_id": "E025",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      2
+    ],
+    "correctness": [
+      1
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 48,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision variables represent counts of indivisible units rather than freely divisible quantities. For example, when the problem statement mentioned choosing daily quantities of specific food items with nutrition and cost data given per item or serving-equivalent, the gold-standard formulation treated those quantities as integer servings.",
+    "explanation": "When the problem involves integer numbers of food servings, fractional values such as 6526/975 servings of Tofu and 193/50 servings of Spinach are not feasible in the intended model. The best practice is to declare the food quantity variables as nonnegative integers. A common mistake is to model them as continuous nonnegative variables, which happens because the variables are described as generic food amounts and diet models are often presented as divisible linear programs. More generally, this reflects that variable domains must encode the physical discreteness of the decision units, because an LP relaxation can return a cheaper fractional solution than the true integer optimum.",
+    "example": "# Wrong\nx_i \\in \\mathbb{R}_+ \\quad \\forall i \\in I\n\n# This allows fractional servings, e.g.:\nx_Tofu = 6526/975, x_Spinach = 193/50\nZ \\approx 17.2467\n\n# Correct\nx_i \\in \\mathbb{Z}_+ \\quad \\forall i \\in I\n\n# Gurobi version:\nx = model.addVars(foods, lb=0, vtype=GRB.INTEGER, name=\"x\")\n\n# Integer feasible optimum:\nx[\"Tofu\"] = 7, x[\"Spinach\"] = 4\nZ = 2*7 + 1*4 = 18",
+    "iteration": 0,
+    "task_id": "E014",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      3,
+      18
+    ],
+    "correctness": [
+      2,
+      6
+    ],
+    "distribution": {
+      "positive": [
+        "F057",
+        "F134",
+        "F102",
+        "F122",
+        "F135",
+        "B062"
+      ],
+      "negative": [
+        "A172",
+        "F080",
+        "F021"
+      ],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": [
+        "A014",
+        "A003",
+        "F126"
+      ]
+    }
+  },
+  {
+    "insight_id": 49,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision quantities represent countable units rather than divisible amounts. For example, when the problem statement mentioned choosing numbers of food servings or units of Chicken, Rice, Broccoli, Tofu, and Beans.",
+    "explanation": "When the problem involves deciding how many servings or units of each food to consume, the integrality of those serving counts changes the feasible region and the optimal cost. The best practice is to match the variable domain to the intended physical meaning of the decision quantity, so countable servings are modeled as integer variables when servings are indivisible. A common mistake is to relax serving counts to continuous variables, which happens because the modeler interprets the absence of an explicit 'whole serving' statement as permission to buy fractional servings. More generally, this reflects that variable domains are part of the mathematical formulation, not a coding detail, and an LP relaxation can produce a cheaper solution that is not feasible for the intended integer problem.",
+    "example": "# Wrong\n# Allows fractional servings, producing x['Beans'] = 2012/150 = 13.413..., cost = 13.413...\nx = model.addVars(foods, lb=0, vtype=GRB.CONTINUOUS, name=\"servings\")\n\n# Correct\n# Servings are modeled as integer counts, so the cheapest feasible solution has 14 servings of Beans, cost = 14\nx = model.addVars(foods, lb=0, vtype=GRB.INTEGER, name=\"servings\")",
+    "iteration": 0,
+    "task_id": "E012",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [],
+    "correctness": [],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 50,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when the optimization task involves selecting quantities of food items whose nutrition and price are given per item or serving, so the quantities may correspond to counts of purchasable servings rather than freely divisible amounts. For example, when the problem statement mentioned nine grocery foods such as Chicken, Rice, Apples, Steak, Lentils, Fish, Tofu, Cheese, and Bread, each providing specified protein, carbohydrates, calories, and cost, and asks for the least spending needed to meet daily dietary requirements.",
+    "explanation": "When the problem involves choosing how many units or servings of each food item to consume, the variable domain determines whether fractional servings are allowed. The best practice is to match the decision-variable type to the intended physical interpretation, using nonnegative integer variables when servings are indivisible counts. A common mistake is to model these quantities as continuous nonnegative variables, which happens because the nutrient constraints and objective are linear and therefore look like a standard continuous diet LP. More generally, this reflects that the algebraic structure of a model is not enough to determine variable type; the discreteness of the real-world decision must also be encoded.",
+    "example": "# Wrong\n# Allows fractional servings and solves the LP relaxation\nx_i >= 0 for all foods i\n\n# Example code\nx = model.addVars(foods, lb=0, vtype=GRB.CONTINUOUS, name=\"servings\")\n\n# This can produce a fractional objective such as 17810/741 \u2248 24.0351,\n# which is not the integer-serving optimum.\n\n# Correct\n# Servings are nonnegative integer counts\nx_i \u2208 Z_+ for all foods i\n\n# Example code\nx = model.addVars(foods, lb=0, vtype=GRB.INTEGER, name=\"servings\")\n\n# With the same nutrient constraints and cost objective, the integer optimum is 26.",
+    "iteration": 0,
+    "task_id": "E005",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [
+      2
+    ],
+    "correctness": [
+      2
+    ],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  },
+  {
+    "insight_id": 51,
+    "taxonomy": {
+      "General Formulation": {
+        "Variable Definition": [
+          "Continuous vs. Discrete Confusion"
+        ]
+      }
+    },
+    "condition": "This insight applies when decision quantities represent counts of indivisible units rather than divisible amounts. For example, when the problem statement mentioned selecting servings of Steak, Rice, Chicken, Iceberg Lettuce, and Almonds, the gold-standard formulation treated the number of servings as integer-valued.",
+    "explanation": "When the problem involves choosing numbers of servings of food items. The best practice is to match the variable domain to the intended physical meaning of the decision, so serving counts are modeled as nonnegative integers when fractional servings are not part of the intended formulation. A common mistake is to relax these serving-count variables to continuous nonnegative variables, which happens because nutritional blending problems are often associated with divisible quantities. More generally, this reflects that variable type is a modeling assumption that can change the feasible region and the optimal objective value.",
+    "example": "# Wrong\nx_i \\in \\mathbb{R}_+ \\quad \\forall i \\in F\n\n# This allows fractional servings such as:\n# x_Chicken = 8309/1803, x_Almonds = 7375/1803\n\n# Correct\nx_i \\in \\mathbb{Z}_+ \\quad \\forall i \\in F\n\n# In Gurobi:\nx = model.addVars(foods, lb=0, vtype=GRB.INTEGER, name=\"Servings\")",
+    "iteration": 0,
+    "task_id": "E009",
+    "merge_version": 0,
+    "refine_version": 0,
+    "occurrence": [],
+    "correctness": [],
+    "distribution": {
+      "positive": [],
+      "negative": [],
+      "unretrieved": [],
+      "irrelevant": [],
+      "invalid": []
+    }
+  }
+]
